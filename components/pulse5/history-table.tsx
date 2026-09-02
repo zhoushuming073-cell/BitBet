@@ -27,7 +27,7 @@ export function HistoryTable({ records }: { records: GameRecord[] }) {
               <TableHead>轮次</TableHead>
               <TableHead>方向</TableHead>
               <TableHead>投入</TableHead>
-              <TableHead>开盘价</TableHead>
+              <TableHead>基准价</TableHead>
               <TableHead>结算价</TableHead>
               <TableHead>结果</TableHead>
               <TableHead className="text-right">盈亏（USDT）</TableHead>

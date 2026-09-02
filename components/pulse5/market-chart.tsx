@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { ArrowDown, ArrowUp, Maximize2 } from "lucide-react";
 import {
   CartesianGrid,
@@ -18,6 +19,13 @@ const money = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
+function niceStep(value: number) {
+  const power = 10 ** Math.floor(Math.log10(value));
+  const fraction = value / power;
+  const factor = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+  return factor * power;
+}
+
 function ChartTip({ active, payload }: { active?: boolean; payload?: Array<{ payload: PricePoint }> }) {
   if (!active || !payload?.[0]) return null;
   const point = payload[0].payload;
@@ -32,14 +40,38 @@ function ChartTip({ active, payload }: { active?: boolean; payload?: Array<{ pay
 export function MarketChart({
   points,
   price,
-  openPrice,
+  baselinePrice,
 }: {
   points: PricePoint[];
   price: number;
-  openPrice: number;
+  baselinePrice: number;
 }) {
-  const rising = !openPrice || price >= openPrice;
-  const delta = openPrice ? price - openPrice : 0;
+  const rising = !baselinePrice || price >= baselinePrice;
+  const delta = baselinePrice ? price - baselinePrice : 0;
+  const scale = useMemo(() => {
+    const values = points.map((point) => point.price).filter(Number.isFinite);
+    if (baselinePrice > 0) values.push(baselinePrice);
+    if (price > 0) values.push(price);
+    if (!values.length) return { domain: ["auto", "auto"] as const, ticks: undefined, step: 0 };
+
+    let min = values[0];
+    let max = values[0];
+    for (let index = 1; index < values.length; index += 1) {
+      min = Math.min(min, values[index]);
+      max = Math.max(max, values[index]);
+    }
+    const anchor = baselinePrice || price;
+    const visibleSpan = Math.max((max - min) * 1.3, anchor * 0.00008, 8);
+    const step = niceStep(visibleSpan / 5);
+    const center = (min + max) / 2;
+    const halfSpan = Math.max((max - min) * 0.65, step * 2.5);
+    const lower = Math.floor((center - halfSpan) / step) * step;
+    const upper = Math.ceil((center + halfSpan) / step) * step;
+    const ticks: number[] = [];
+    for (let tick = lower; tick <= upper + step / 2; tick += step) ticks.push(tick);
+
+    return { domain: [lower, upper] as [number, number], ticks, step };
+  }, [baselinePrice, points, price]);
 
   return (
     <section className="chart-panel" aria-label="BTC 实时价格图表">
@@ -52,8 +84,9 @@ export function MarketChart({
         </div>
         <div className={`round-change ${rising ? "up" : "down"}`}>
           {rising ? <ArrowUp /> : <ArrowDown />}
-          <span>{delta >= 0 ? "+" : ""}{money.format(delta)} ({openPrice ? ((delta / openPrice) * 100).toFixed(3) : "0.000"}%)</span>
+          <span>{delta >= 0 ? "+" : ""}{money.format(delta)} ({baselinePrice ? ((delta / baselinePrice) * 100).toFixed(3) : "0.000"}%)</span>
         </div>
+        {scale.step > 0 && <span className="scale-unit">纵轴 {money.format(scale.step)} USDT / 格</span>}
         <Maximize2 className="maximize" aria-hidden="true" />
       </div>
 
@@ -74,7 +107,9 @@ export function MarketChart({
               />
               <YAxis
                 dataKey="price"
-                domain={["auto", "auto"]}
+                domain={scale.domain}
+                ticks={scale.ticks}
+                allowDataOverflow
                 orientation="right"
                 tickFormatter={(v) => money.format(v)}
                 width={86}
@@ -82,8 +117,14 @@ export function MarketChart({
                 tickLine={false}
                 axisLine={false}
               />
-              {openPrice > 0 && (
-                <ReferenceLine y={openPrice} stroke="#9a6b15" strokeDasharray="4 4" label={{ value: "开盘", fill: "#b88728", fontSize: 11, position: "insideTopLeft" }} />
+              {baselinePrice > 0 && (
+                <ReferenceLine
+                  y={baselinePrice}
+                  stroke="#f0b90b"
+                  strokeWidth={1.5}
+                  strokeDasharray="6 4"
+                  label={{ value: "上一轮收盘基线", fill: "#f0b90b", fontSize: 11, position: "insideTopLeft" }}
+                />
               )}
               <Tooltip content={<ChartTip />} isAnimationActive={false} />
               <Line

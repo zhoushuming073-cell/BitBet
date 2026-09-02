@@ -111,7 +111,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .timeframes button.active { background: #202b35; color: #f0f3f6; }
 .round-change { display: flex; align-items: center; gap: 4px; margin-left: 16px; padding-left: 16px; border-left: 1px solid #26313b; font-size: 12px; }
 .round-change svg { width: 15px; }
-.maximize { margin-left: auto; width: 17px; color: #7e8a97; }
+.scale-unit { margin-left: auto; color: #778491; font-size: 11px; font-variant-numeric: tabular-nums; }
+.maximize { margin-left: 12px; width: 17px; color: #7e8a97; }
 .chart-stage { height: 428px; padding: 3px 0 0 5px; }
 .chart-stage .recharts-cartesian-axis-tick-value { font-size: 11px; }
 .chart-tip { display: grid; gap: 4px; padding: 9px 11px; border: 1px solid #33404d; border-radius: 6px; background: #111a22; box-shadow: 0 9px 24px rgba(0,0,0,.26); }
@@ -235,6 +236,7 @@ footer .footer-activity { color: #e8a623; margin-left: 2px; }
   .chart-toolbar { padding: 0 7px; }
   .timeframes button { padding: 7px 9px; }
   .round-change { margin-left: 8px; padding-left: 8px; }
+  .scale-unit { display: none; }
   .payout-preview small { white-space: normal; line-height: 1.35; }
   .footer-dot, .footer-dot + span, .footer-activity { display: none; }
 }

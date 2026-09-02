@@ -20,9 +20,9 @@ const roundFor = (time: number) => {
   return { start, end: start + ROUND_MS };
 };
 
-async function getKlines(start?: number, limit = 80) {
+async function getKlines(interval: "1m" | "5m" = "1m", start?: number, limit = 80) {
   const base = "https://data-api.binance.vision/api/v3/klines";
-  const params = new URLSearchParams({ symbol: "BTCUSDT", interval: "1m", limit: String(limit) });
+  const params = new URLSearchParams({ symbol: "BTCUSDT", interval, limit: String(limit) });
   if (start) params.set("startTime", String(start));
   const response = await fetch(`${base}?${params}`, { cache: "no-store" });
   if (!response.ok) throw new Error("Binance kline request failed");
@@ -33,7 +33,7 @@ export function MarketGame() {
   const [now, setNow] = useState(Date.now());
   const [ticker, setTicker] = useState<Ticker>({ price: 0, change: 0, high: 0, low: 0, volume: 0, quoteVolume: 0 });
   const [points, setPoints] = useState<PricePoint[]>([]);
-  const [openPrice, setOpenPrice] = useState(0);
+  const [baselinePrice, setBaselinePrice] = useState(0);
   const [connected, setConnected] = useState(false);
   const [balance, setBalance] = useState(START_BALANCE);
   const [activeBet, setActiveBet] = useState<ActiveBet | null>(null);
@@ -47,6 +47,10 @@ export function MarketGame() {
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
   const progress = ((ROUND_MS - (round.end - now)) / ROUND_MS) * 100;
+  const roundPoints = useMemo(
+    () => points.filter((point) => point.time >= round.start && point.time <= round.end).slice(-360),
+    [points, round.start, round.end],
+  );
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
@@ -75,7 +79,7 @@ export function MarketGame() {
 
   useEffect(() => {
     let cancelled = false;
-    getKlines(undefined, 80)
+    getKlines("1m", undefined, 80)
       .then((rows) => {
         if (cancelled) return;
         setPoints(rows.map((row) => ({ time: row[0], price: Number(row[4]) })));
@@ -86,12 +90,12 @@ export function MarketGame() {
 
   useEffect(() => {
     let cancelled = false;
-    getKlines(round.start, 1)
+    getKlines("5m", round.start - ROUND_MS, 1)
       .then((rows) => {
-        if (!cancelled && rows[0]) setOpenPrice(Number(rows[0][1]));
+        if (!cancelled && rows[0]) setBaselinePrice(Number(rows[0][4]));
       })
       .catch(() => {
-        if (!cancelled) setOpenPrice(0);
+        if (!cancelled) setBaselinePrice(0);
       });
     return () => { cancelled = true; };
   }, [round.start]);
@@ -114,7 +118,7 @@ export function MarketGame() {
         const data = JSON.parse(event.data) as { c: string; P: string; h: string; l: string; v: string; q: string; E: number };
         const price = Number(data.c);
         setTicker({ price, change: Number(data.P), high: Number(data.h), low: Number(data.l), volume: Number(data.v), quoteVolume: Number(data.q) });
-        setPoints((current) => [...current.slice(-159), { time: data.E || Date.now(), price }]);
+        setPoints((current) => [...current.slice(-359), { time: data.E || Date.now(), price }]);
       };
       socket.onerror = () => socket?.close();
       socket.onclose = () => {
@@ -137,8 +141,8 @@ export function MarketGame() {
     settling.current = true;
     let close = ticker.price;
     try {
-      const rows = await getKlines(bet.end, 1);
-      if (rows[0]) close = Number(rows[0][1]);
+      const rows = await getKlines("5m", bet.start, 1);
+      if (rows[0]) close = Number(rows[0][4]);
     } catch {
       // The first live tick after expiry remains a useful fallback.
     }
@@ -161,8 +165,8 @@ export function MarketGame() {
 
   const submitBet = () => {
     const amount = Math.round((Number(stake) || 0) * 100) / 100;
-    if (!connected || activeBet || seconds <= 10 || amount <= 0 || amount > balance || !openPrice) return;
-    const bet: ActiveBet = { id: round.start, start: round.start, end: round.end, side, stake: amount, open: openPrice };
+    if (!connected || activeBet || seconds <= 10 || amount <= 0 || amount > balance || !baselinePrice) return;
+    const bet: ActiveBet = { id: round.start, start: round.start, end: round.end, side, stake: amount, open: baselinePrice };
     setBalance((value) => value - amount);
     setActiveBet(bet);
   };
@@ -175,7 +179,7 @@ export function MarketGame() {
     setStake("100");
   };
 
-  const priceUp = !openPrice || ticker.price >= openPrice;
+  const priceUp = !baselinePrice || ticker.price >= baselinePrice;
 
   return (
     <main className="app-shell">
@@ -205,10 +209,10 @@ export function MarketGame() {
               <div className="timer-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><strong>{mm}:{ss}</strong></div>
               <span>本轮倒计时</span>
             </div>
-            <div className="round-price"><span>开盘价</span><strong>{openPrice ? money.format(openPrice) : "—"}</strong></div>
+            <div className="round-price"><span>上一轮收盘基线</span><strong>{baselinePrice ? money.format(baselinePrice) : "—"}</strong></div>
             <div className="round-price"><span>当前价</span><strong className={priceUp ? "up" : "down"}>{ticker.price ? money.format(ticker.price) : "—"}</strong></div>
           </div>
-          <MarketChart points={points} price={ticker.price} openPrice={openPrice} />
+          <MarketChart points={roundPoints} price={ticker.price} baselinePrice={baselinePrice} />
         </section>
 
         <BetPanel side={side} setSide={setSide} stake={stake} setStake={setStake} balance={balance} seconds={seconds} activeBet={activeBet} connected={connected} onSubmit={submitBet} />
