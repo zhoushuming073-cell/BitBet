@@ -367,3 +367,54 @@ footer svg { width: 15px; color: #87929c; }
 @media (prefers-reduced-motion: reduce) {
   .scroll-fade-b, .tw-shimmer { animation: none !important; }
 }
+
+/* ---- Account / auth / profile / leaderboard ---- */
+.account-page { max-width: 520px; margin: 0 auto; padding: 20px 14px; display: grid; gap: 12px; }
+.account-card { border: 1px solid var(--border); border-radius: var(--radius); background: rgba(16, 23, 30, 0.96); padding: 20px; }
+.auth-title { font-size: 20px; font-weight: 680; margin: 0 0 4px; }
+.auth-sub { color: #7f8a94; font-size: 13px; margin: 0 0 18px; }
+.auth-input { width: 100%; height: 46px; border: 1px solid #394651; border-radius: 10px; background: #0c1218; color: #f4f6f8; padding: 0 14px; font-size: 15px; }
+.auth-input:focus { outline: 2px solid var(--ring); outline-offset: 2px; }
+.auth-button { width: 100%; height: 46px; margin-top: 14px; border: 0; border-radius: 10px; background: var(--primary); color: #1d0e00; font-size: 15px; font-weight: 700; cursor: pointer; transition: background 160ms ease; }
+.auth-button:hover:not(:disabled) { background: #ffa735; }
+.auth-button:disabled { background: #29323b; color: #737e88; cursor: not-allowed; }
+.auth-button-ghost { background: transparent; border: 1px solid #34404b; color: #aeb7c0; font-weight: 600; }
+.auth-button-ghost:hover:not(:disabled) { background: #151e26; color: #f3f5f7; }
+.auth-error { margin-top: 12px; padding: 10px 12px; border: 1px solid rgba(240, 93, 94, 0.3); border-radius: 9px; background: rgba(240, 93, 94, 0.08); color: #f39a9b; font-size: 12px; line-height: 1.45; }
+.auth-link { display: block; margin-top: 16px; color: #7f8a94; font-size: 13px; text-align: center; }
+.auth-link a { color: var(--primary); text-decoration: none; }
+.auth-link-btn { border: 0; background: transparent; color: #7f8a94; font-size: 13px; cursor: pointer; }
+.auth-link-btn:hover { color: #f3f5f7; }
+
+.profile-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.profile-stats { padding: 16px 20px; }
+.stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.stat-row + .stat-row { margin-top: 14px; }
+.stat { display: grid; gap: 3px; }
+.stat span { color: #7f8a94; font-size: 12px; }
+.stat strong { font-family: var(--font-mono); font-size: 16px; font-weight: 650; }
+.section-title { margin: 0 0 12px; font-size: 15px; font-weight: 680; }
+.profile-row { display: grid; grid-template-columns: 0.8fr 1.2fr 0.8fr 1fr; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #202a33; font-family: var(--font-mono); font-size: 12px; }
+.profile-row:first-child { border-top: 0; }
+
+.lb-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+.lb-tab { height: 34px; padding: 0 14px; border: 1px solid #34404b; border-radius: 9px; background: transparent; color: #aeb7c0; font-size: 13px; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, color 150ms ease; }
+.lb-tab:hover { border-color: #66727c; color: #f3f5f7; }
+.lb-tab.active { border-color: var(--primary); background: rgba(247, 147, 26, 0.12); color: #ffc176; }
+.lb-list { overflow-x: auto; scrollbar-width: thin; }
+.lb-head, .lb-row { min-width: 440px; display: grid; grid-template-columns: 0.7fr 1.6fr 1.2fr 1fr 1.2fr; align-items: center; gap: 10px; padding: 0 4px; }
+.lb-head { min-height: 34px; color: #74808b; font-size: 12px; }
+.lb-row { min-height: 42px; border-top: 1px solid #202a33; font-family: var(--font-mono); font-size: 12px; }
+.lb-rank { color: #939da6; }
+.lb-name { font-family: var(--font-sans); font-weight: 650; }
+.lb-mine { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: #cbd2d8; }
+.lb-mine span:first-child { color: #7f8a94; }
+.lb-mine strong { color: var(--primary); font-family: var(--font-mono); font-size: 16px; }
+
+.account-entry { display: inline-flex; align-items: center; gap: 9px; height: 34px; padding: 0 12px; border: 1px solid #33404b; border-radius: 9px; color: #d8dde2; font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.account-entry:hover { border-color: #66727c; color: #f3f5f7; }
+.account-entry a { color: #d8dde2; text-decoration: none; }
+.account-entry a:hover { color: #f3f5f7; }
+.account-entry .account-entry-primary { color: var(--primary); }
+.account-entry-muted { color: #66727c; }
+.account-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--up); }
