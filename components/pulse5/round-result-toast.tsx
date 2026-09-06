@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Minus } from "lucide-react";
+import { ArrowDown, ArrowUp, Gift, Minus } from "lucide-react";
 import type { SettlementNotice } from "@/lib/pulse5/engine/types";
 
 const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -19,9 +19,16 @@ const RESULT_TEXT: Record<string, string> = { UP: "收涨", DOWN: "收跌", DRAW
 /**
  * Non-blocking round-result card. Appears the moment a round settles and fades
  * out automatically, so the hand-off to the next round reads as intentional
- * instead of orders simply vanishing.
+ * instead of orders simply vanishing. When the round paid out, a one-tap
+ * "立即领取" collects the winnings right here for a satisfying claim moment.
  */
-export function RoundResultToast({ notice }: { notice: SettlementNotice | null }) {
+export function RoundResultToast({
+  notice,
+  onClaim,
+}: {
+  notice: SettlementNotice | null;
+  onClaim?: () => void;
+}) {
   // Only the auto-hide marker lives in state; the notice itself is rendered
   // straight from props, so no synchronous setState happens inside the effect.
   const [hiddenRound, setHiddenRound] = useState<number | null>(null);
@@ -40,6 +47,7 @@ export function RoundResultToast({ notice }: { notice: SettlementNotice | null }
   const side = notice.winningSide;
   const tone = side === "UP" ? "is-up" : side === "DOWN" ? "is-down" : "is-draw";
   const Icon = side === "UP" ? ArrowUp : side === "DOWN" ? ArrowDown : Minus;
+  const claimable = notice.grossPayout > 0;
 
   return (
     <div className="round-toast-layer" aria-live="polite">
@@ -51,7 +59,7 @@ export function RoundResultToast({ notice }: { notice: SettlementNotice | null }
         {notice.orderCount > 0 ? (
           <div className="rt-body">
             <span>竞猜 {money.format(notice.totalInvested)}</span>
-            <span>到账 {money.format(notice.grossPayout)}</span>
+            <span>可领取 {money.format(notice.grossPayout)}</span>
             <span className={notice.roundPnL >= 0 ? "up" : "down"}>
               盈亏 {signed(notice.roundPnL)}
             </span>
@@ -59,6 +67,19 @@ export function RoundResultToast({ notice }: { notice: SettlementNotice | null }
         ) : (
           <div className="rt-body"><span>新一轮已开始</span></div>
         )}
+        {claimable && onClaim ? (
+          <button
+            type="button"
+            className="rt-claim"
+            onClick={() => {
+              onClaim();
+              setHiddenRound(notice.roundId);
+            }}
+          >
+            <Gift aria-hidden="true" />
+            立即领取
+          </button>
+        ) : null}
       </div>
     </div>
   );

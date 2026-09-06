@@ -43,9 +43,9 @@ test("round-open line stays in range even if it scrolled off the visible samples
   assert.ok(r.lo <= 99900, "round open must always be accommodated");
 });
 
-test("Case 6: lowerBound implements the sliding 2-minute window", () => {
+test("Case 6: lowerBound implements the sliding 1-minute window", () => {
   const pts = [0, 30, 60, 90, 120, 150].map((s) => ({ time: 1_000_000 + s * 1000, price: 100000 }));
-  // Window 120s wide ending at t=150s: first visible sample is t=30s.
+  // Window 60s wide ending at t=90s: first visible sample is t=30s.
   const idx = scale.lowerBound(pts, 1_000_000 + 30_000);
   assert.equal(pts[idx].time, 1_000_000 + 30_000);
   // Slide forward 60s: first visible sample becomes t=90s.

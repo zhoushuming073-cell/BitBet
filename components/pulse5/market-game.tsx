@@ -6,6 +6,7 @@ import { createBrowserEngine, type BrowserRuntime } from "@/lib/pulse5/engine/cr
 import type { EngineView } from "@/lib/pulse5/engine/Pulse5Engine";
 import { TradePanel } from "./trade-panel";
 import { HistoryTable } from "./history-table";
+import { OpenOrders } from "./open-orders";
 import { MarketChart } from "./market-chart";
 import { RoundResultToast } from "./round-result-toast";
 
@@ -14,39 +15,10 @@ const money = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
-function roundClock(roundId: number) {
-  return new Date(roundId).toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
-function CurrentPrediction({ view }: { view: EngineView }) {
-  const position = view.position;
-  const hasPrediction = position.totalInvested > 0;
-
-  return (
-    <section className="current-prediction" aria-labelledby="current-prediction-title">
-      <div>
-        <h2 id="current-prediction-title">本轮竞猜</h2>
-        <p>{hasPrediction ? `等待 ${roundClock(view.round.id + 300_000)} 结算` : "选择方向并提交本轮竞猜"}</p>
-      </div>
-      {hasPrediction ? (
-        <div className="prediction-summary">
-          {position.up.stake > 0 ? (
-            <span><b className="up">看涨</b>{money.format(position.up.stake)} USDT</span>
-          ) : null}
-          {position.down.stake > 0 ? (
-            <span><b className="down">看跌</b>{money.format(position.down.stake)} USDT</span>
-          ) : null}
-          <span><b>合计</b>{money.format(position.totalInvested)} USDT</span>
-        </div>
-      ) : (
-        <span className="prediction-empty">暂无竞猜</span>
-      )}
-    </section>
-  );
+function formatCountdown(seconds: number) {
+  const minutes = String(Math.floor(seconds / 60)).padStart(2, "0");
+  const remainder = String(seconds % 60).padStart(2, "0");
+  return `${minutes}:${remainder}`;
 }
 
 export function MarketGame() {
@@ -74,6 +46,16 @@ export function MarketGame() {
     if (window.confirm("确定重置虚拟余额和竞猜记录吗？")) runtime.engine.reset();
   };
 
+  const claimOrder = (orderId: string) => {
+    if (!runtime) return;
+    runtime.engine.claimOrder(orderId);
+  };
+
+  const claimAll = () => {
+    if (!runtime) return;
+    runtime.engine.claimAll();
+  };
+
   if (!view || !runtime) {
     return (
       <main className="app-shell loading-shell">
@@ -94,7 +76,7 @@ export function MarketGame() {
 
   return (
     <main className="app-shell">
-      <RoundResultToast notice={view.lastSettlement} />
+      <RoundResultToast notice={view.lastSettlement} onClaim={claimAll} />
 
       <header className="topbar">
         <div className="brand">
@@ -135,6 +117,7 @@ export function MarketGame() {
               <div className="market-facts">
                 <div><span>本轮开盘价</span><strong>{openPrice ? `$${money.format(openPrice)}` : "等待确认"}</strong></div>
                 <div><span>本轮方向</span><strong className={rising ? "up" : "down"}>{currentPrice ? (rising ? "上涨" : "下跌") : "等待行情"}</strong></div>
+                <div className="heading-countdown"><span>剩余</span><strong>{formatCountdown(view.round.secondsRemaining)}</strong></div>
               </div>
             </div>
             <MarketChart
@@ -143,15 +126,20 @@ export function MarketGame() {
               roundOpen={openPrice}
               roundStart={view.round.id}
               connected={view.connected}
-              orders={[]}
+              orders={view.openOrders}
             />
           </section>
 
           <TradePanel engine={runtime.engine} view={view} />
         </div>
 
-        <CurrentPrediction view={view} />
-        <HistoryTable orders={view.settledOrders} />
+        <OpenOrders orders={view.openOrders} />
+        <HistoryTable
+          orders={view.settledOrders}
+          claimable={view.claimable}
+          onClaim={claimOrder}
+          onClaimAll={claimAll}
+        />
       </div>
 
       <footer>

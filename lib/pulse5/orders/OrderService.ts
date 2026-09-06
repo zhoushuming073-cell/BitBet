@@ -85,6 +85,7 @@ export class OrderService {
       status: "OPEN",
       payout: 0,
       profit: 0,
+      claimed: false,
       createdAt: now,
       settledAt: null,
     };

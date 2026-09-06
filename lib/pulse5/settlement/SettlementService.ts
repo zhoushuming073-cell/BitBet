@@ -46,6 +46,11 @@ function summarize(roundId: number, orders: Order[], result: RoundResult): Round
  * Official Binance 5m kline open/close decides UP/DOWN/DRAW. Every order settles
  * at its OWN locked odds. DRAW refunds every stake with no takeout. settleRound
  * is idempotent — calling it again never credits the balance twice.
+ *
+ * Winnings (WON payout) and refunds (VOID) are NOT credited to the spendable
+ * balance here; they are marked `claimed: false` and only enter the balance when
+ * the player collects them via LedgerStore.claimOrder / claimAll. This keeps a
+ * tangible per-round "领取" interaction.
  */
 export function settleRound(input: SettleInput): SettleOutcome {
   const { ledger, roundId, openPrice, closePrice, now } = input;
@@ -67,7 +72,7 @@ export function settleRound(input: SettleInput): SettleOutcome {
       order.status = "VOID";
       order.payout = money(order.stake); // full refund
       order.profit = 0;
-      ledger.credit(order.stake);
+      order.claimed = false; // refund is claimable, not auto-credited
     } else if (
       (result === "UP" && order.side === "up") ||
       (result === "DOWN" && order.side === "down")
@@ -75,11 +80,12 @@ export function settleRound(input: SettleInput): SettleOutcome {
       order.status = "WON";
       order.payout = money(order.stake * order.lockedOdds);
       order.profit = money(order.payout - order.stake);
-      ledger.credit(order.payout);
+      order.claimed = false; // winnings are claimable, not auto-credited
     } else {
       order.status = "LOST";
       order.payout = 0;
       order.profit = money(-order.stake);
+      order.claimed = true; // nothing to claim on a loss
     }
     order.settledAt = now;
   }

@@ -6,8 +6,8 @@
  * feeds the odds, order, settlement or balance logic.
  */
 export const CHART_CONFIG = {
-  /** Sliding viewport: always show the most recent 2 minutes. */
-  VISIBLE_WINDOW_SECONDS: 120,
+  /** Sliding viewport: always show the most recent 1 minute. */
+  VISIBLE_WINDOW_SECONDS: 60,
   /** Keep a longer in-memory buffer (5 minutes) so rolling stays smooth. */
   DATA_RETENTION_SECONDS: 300,
   /** Market samples are committed to history at most ~5 times per second. */

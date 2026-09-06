@@ -38,6 +38,8 @@ export interface EngineView {
   breakdown: ProbabilityBreakdown | null;
   position: CurrentPosition;
   balance: number;
+  /** Unclaimed winnings/refunds waiting to be collected via claimOrder/claimAll. */
+  claimable: number;
   openOrders: Order[];
   settledOrders: Order[];
   roundSummaries: RoundRecord[];
@@ -351,6 +353,20 @@ export class Pulse5Engine {
     return outcome;
   }
 
+  /** Collect a single settled order's winnings/refund into the balance. */
+  claimOrder(orderId: string): number {
+    const amount = this.ledger.claimOrder(orderId);
+    if (amount > 0) this.emit();
+    return amount;
+  }
+
+  /** Collect all outstanding winnings/refunds at once. */
+  claimAll(): number {
+    const amount = this.ledger.claimAll();
+    if (amount > 0) this.emit();
+    return amount;
+  }
+
   reset(): void {
     this.ledger.reset();
     this.quoteService.clear();
@@ -395,6 +411,7 @@ export class Pulse5Engine {
       breakdown,
       position,
       balance: this.ledger.balance,
+      claimable: this.ledger.claimableBalance(),
       // Hand React fresh copies so framework-side freezing of state can never
       // reach the engine's live, mutable arrays/objects (appendPoint, settle…).
       openOrders: openOrders.map((o) => ({ ...o })),

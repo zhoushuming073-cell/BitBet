@@ -110,6 +110,12 @@ export interface Order {
   status: OrderStatus;
   payout: number;
   profit: number;
+  /**
+   * Whether the settlement payout (WON) or refund (VOID) has been claimed into
+   * the spendable balance. Winnings stay "claimable" until the player collects
+   * them, giving each settled round a tangible claim interaction.
+   */
+  claimed: boolean;
   createdAt: number;
   settledAt: number | null;
 }

@@ -14,7 +14,7 @@ export function lowerBound(points: PricePoint[], left: number): number {
 }
 
 export interface RangeInput {
-  /** Prices of the samples currently inside the rolling 2-minute window. */
+  /** Prices of the samples currently inside the rolling 1-minute window. */
   visiblePrices: number[];
   /** Current round open (always included even if it scrolled off the left). */
   roundOpen: number;

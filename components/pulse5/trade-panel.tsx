@@ -17,6 +17,16 @@ const quickMoney = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
+function formatOdds(odds: number | undefined) {
+  if (!Number.isFinite(odds) || !(odds! > 0)) return "—";
+  return `${odds!.toFixed(2)}x`;
+}
+
+function formatPayout(payout: number | undefined) {
+  if (!Number.isFinite(payout) || !(payout! > 0)) return "—";
+  return money.format(payout!);
+}
+
 const STATE_LABEL: Record<EngineView["bettingState"], string> = {
   OK: "",
   VOLATILITY_WARMING_UP: "行情正在准备，很快可以竞猜",
@@ -42,14 +52,28 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
   const [success, setSuccess] = useState(false);
 
   const amount = Math.round((Number(stake) || 0) * 100) / 100;
-  const estimate = useMemo(
-    () => (amount > 0 ? engine.estimateQuote(side, amount, view.now) : null),
-    [engine, side, amount, view.now],
-  );
+  const validAmount = Number.isFinite(amount) && amount >= GAME_CONFIG.MIN_BET;
 
+  // Compute BOTH sides' indicative execution quotes so each button shows its
+  // own price-impact-adjusted odds (not the raw base odds). Both refresh when
+  // the amount, price, time, open orders or inventory change.
+  const { upEstimate, downEstimate } = useMemo(() => {
+    if (!validAmount) return { upEstimate: null, downEstimate: null };
+    return {
+      upEstimate: engine.estimateQuote("up", amount, view.now),
+      downEstimate: engine.estimateQuote("down", amount, view.now),
+    };
+  }, [engine, amount, validAmount, view.now]);
+
+  const estimate = side === "up" ? upEstimate : downEstimate;
   const locked = view.phase === "LOCKED" || view.phase === "ENDED";
   const sideBlocked = side === "up" ? !view.upQuotable : !view.downQuotable;
-  const canPredict = view.bettingState === "OK" && !sideBlocked && Boolean(estimate?.quotable) && amount <= view.balance + 1e-9;
+  const canPredict =
+    view.bettingState === "OK" &&
+    !sideBlocked &&
+    Boolean(estimate?.quotable) &&
+    amount <= view.balance + 1e-9;
+
   const roundLabel = new Date(view.round.id).toLocaleTimeString("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
@@ -101,6 +125,8 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
   };
 
   const unavailableMessage = STATE_LABEL[view.bettingState];
+  const upDisabled = !view.upQuotable;
+  const downDisabled = !view.downQuotable;
 
   return (
     <aside className="prediction-panel" aria-labelledby="prediction-title">
@@ -118,29 +144,6 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
       <div className="countdown" aria-label={`本轮剩余 ${formatCountdown(view.round.secondsRemaining)}`}>
         <strong>{formatCountdown(view.round.secondsRemaining)}</strong>
         <span>本轮剩余时间</span>
-      </div>
-
-      <div className="side-choice" aria-label="选择竞猜方向">
-        <button
-          type="button"
-          className={side === "up" ? "up selected" : "up"}
-          onClick={() => chooseSide("up")}
-          aria-pressed={side === "up"}
-          data-testid="side-up"
-        >
-          <ArrowUp aria-hidden="true" />
-          <span>看涨</span>
-        </button>
-        <button
-          type="button"
-          className={side === "down" ? "down selected" : "down"}
-          onClick={() => chooseSide("down")}
-          aria-pressed={side === "down"}
-          data-testid="side-down"
-        >
-          <ArrowDown aria-hidden="true" />
-          <span>看跌</span>
-        </button>
       </div>
 
       <label className="stake-label" htmlFor="prediction-stake">竞猜金额</label>
@@ -170,9 +173,37 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
         <button type="button" onClick={() => setQuickAmount(view.balance)}>全仓</button>
       </div>
 
-      <div className="prediction-detail">
-        <span>预计可得</span>
-        <strong>{money.format(estimate?.potentialPayout ?? 0)} USDT</strong>
+      <div className="side-choice" aria-label="选择竞猜方向">
+        <button
+          type="button"
+          className={side === "up" ? "up selected" : "up"}
+          onClick={() => chooseSide("up")}
+          aria-pressed={side === "up"}
+          disabled={upDisabled}
+          data-testid="side-up"
+        >
+          <span className="side-head">
+            <ArrowUp aria-hidden="true" />
+            <span>看涨</span>
+          </span>
+          <span className="side-odds">{formatOdds(upEstimate?.executionOdds)}</span>
+          <span className="side-payout">可得 {formatPayout(upEstimate?.potentialPayout)}</span>
+        </button>
+        <button
+          type="button"
+          className={side === "down" ? "down selected" : "down"}
+          onClick={() => chooseSide("down")}
+          aria-pressed={side === "down"}
+          disabled={downDisabled}
+          data-testid="side-down"
+        >
+          <span className="side-head">
+            <ArrowDown aria-hidden="true" />
+            <span>看跌</span>
+          </span>
+          <span className="side-odds">{formatOdds(downEstimate?.executionOdds)}</span>
+          <span className="side-payout">可得 {formatPayout(downEstimate?.potentialPayout)}</span>
+        </button>
       </div>
 
       <button

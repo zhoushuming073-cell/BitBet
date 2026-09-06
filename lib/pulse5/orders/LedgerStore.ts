@@ -36,7 +36,12 @@ export class LedgerStore {
     this.persister = persister;
     const initial = snapshot ?? persister?.load() ?? emptySnapshot();
     this.balance = sanitizeMoney(initial.balance, GAME_CONFIG.INITIAL_BALANCE);
-    this.orders = Array.isArray(initial.orders) ? initial.orders : [];
+    // Migration: orders persisted before the claim feature were credited to the
+    // balance at settlement time, so they default to `claimed: true`.
+    this.orders = (Array.isArray(initial.orders) ? initial.orders : []).map((o) => ({
+      ...o,
+      claimed: typeof o.claimed === "boolean" ? o.claimed : o.status !== "OPEN",
+    }));
     this.rounds = new Map(Object.entries(initial.rounds ?? {}));
     this.idempotency = new Map(Object.entries(initial.idempotency ?? {}));
     this.settledRounds = new Set(initial.settledRounds ?? []);
@@ -86,6 +91,50 @@ export class LedgerStore {
 
   markSettled(roundId: number): void {
     this.settledRounds.add(String(roundId));
+  }
+
+  /**
+   * Claimable amount for one settled order: the WON payout or the VOID refund.
+   * LOST orders (and anything already claimed) return 0.
+   */
+  claimableOf(order: Order): number {
+    if (order.claimed || order.status === "OPEN") return 0;
+    if (order.status === "WON") return money(order.payout);
+    if (order.status === "VOID") return money(order.stake);
+    return 0;
+  }
+
+  /** Total unclaimed winnings/refunds across all settled orders. */
+  claimableBalance(): number {
+    return money(this.orders.reduce((sum, order) => sum + this.claimableOf(order), 0));
+  }
+
+  /** Claim a single order; returns the amount credited (0 if nothing to claim). */
+  claimOrder(orderId: string): number {
+    const order = this.orders.find((o) => o.id === orderId);
+    if (!order) return 0;
+    const amount = this.claimableOf(order);
+    if (amount <= 0) return 0;
+    order.claimed = true;
+    this.credit(amount);
+    this.persist();
+    return amount;
+  }
+
+  /** Claim everything outstanding; returns the total credited. */
+  claimAll(): number {
+    let total = 0;
+    for (const order of this.orders) {
+      const amount = this.claimableOf(order);
+      if (amount <= 0) continue;
+      order.claimed = true;
+      total = money(total + amount);
+    }
+    if (total > 0) {
+      this.credit(total);
+      this.persist();
+    }
+    return total;
   }
 
   reset(): void {

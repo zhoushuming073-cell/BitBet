@@ -234,8 +234,8 @@ test("betting locks exactly at end - 15s (15.001 ok, 15.000/14.999 reject)", () 
   assert.throws(() => e.requestQuote("up", 100, end - 14_999), (err) => err.code === ErrorCode.ROUND_LOCKED);
 });
 
-// ---- 51/53/79. settlement win/loss/draw + idempotency ----
-test("settlement pays winners at locked odds, voids draw, is idempotent", () => {
+// ---- 51/53/79. settlement win/loss/draw + idempotency + claimable payouts ----
+test("settlement marks winners claimable, voids draw, is idempotent", () => {
   // UP round: one up winner @2.1, one down loser.
   const ledger = new LedgerStore.LedgerStore(null);
   ledger.balance = 9800;
@@ -243,26 +243,34 @@ test("settlement pays winners at locked odds, voids draw, is idempotent", () => 
   ledger.addOrder(order(R, "down", 100, 2.0));
   const first = Settlement.settleRound({ ledger, roundId: R, openPrice: OPEN, closePrice: OPEN + 50, now: R + 300_000 });
   assert.equal(first.result, "UP");
-  assert.equal(ledger.balance, 9800 + 210); // winner credited, loser pays nothing extra
+  assert.equal(ledger.balance, 9800); // winnings are NOT auto-credited; await claim
   const up = ledger.orders.find((o) => o.side === "up");
   const down = ledger.orders.find((o) => o.side === "down");
-  assert.equal(up.status, "WON"); assert.equal(up.payout, 210);
-  assert.equal(down.status, "LOST"); assert.equal(down.profit, -100);
+  assert.equal(up.status, "WON"); assert.equal(up.payout, 210); assert.equal(up.claimed, false);
+  assert.equal(down.status, "LOST"); assert.equal(down.profit, -100); assert.equal(down.claimed, true);
+  assert.equal(ledger.claimableBalance(), 210);
   assert.equal(first.summary.roundPnL, 210 - 200);
+  // claim the winner -> balance credits exactly once
+  assert.equal(ledger.claimOrder(up.id), 210);
+  assert.equal(ledger.balance, 9800 + 210);
+  assert.equal(ledger.claimableBalance(), 0);
   // settle again -> no double credit
   const second = Settlement.settleRound({ ledger, roundId: R, openPrice: OPEN, closePrice: OPEN + 50, now: R + 300_000 });
   assert.equal(second.alreadySettled, true);
   assert.equal(ledger.balance, 9800 + 210);
 
-  // DRAW refunds both stakes with no takeout.
+  // DRAW refunds both stakes, claimable with no takeout.
   const ledger2 = new LedgerStore.LedgerStore(null);
   ledger2.balance = 9800;
   ledger2.addOrder(order(R + 300_000, "up", 100, 2.1));
   ledger2.addOrder(order(R + 300_000, "down", 100, 2.0));
   const draw = Settlement.settleRound({ ledger: ledger2, roundId: R + 300_000, openPrice: OPEN, closePrice: OPEN, now: R + 600_000 });
   assert.equal(draw.result, "DRAW");
+  assert.equal(ledger2.balance, 9800); // refunds not auto-credited
+  assert.ok(ledger2.orders.every((o) => o.status === "VOID" && o.profit === 0 && o.claimed === false));
+  assert.equal(ledger2.claimableBalance(), 200);
+  assert.equal(ledger2.claimAll(), 200);
   assert.equal(ledger2.balance, 10_000);
-  assert.ok(ledger2.orders.every((o) => o.status === "VOID" && o.profit === 0));
 });
 
 // ---- persistence: in-memory ledger survives rehydration ----

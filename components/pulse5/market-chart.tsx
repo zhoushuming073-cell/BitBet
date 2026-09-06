@@ -134,7 +134,7 @@ export function MarketChart({
       }
       const livePrice = anim.rendered || p.price || 0;
 
-      // ---- 2. continuous 2-minute sliding window (wall-clock right edge) ----
+      // ---- 2. continuous 1-minute sliding window (wall-clock right edge) ----
       const right = Date.now();
       const left = right - VISIBLE_WINDOW_MS;
       const plotW = Math.max(1, cssW - PAD_L - PAD_R);
@@ -234,7 +234,7 @@ export function MarketChart({
         }
       }
 
-      // round-start vertical marker, only while inside the 2-minute window
+      // round-start vertical marker, only while inside the 1-minute window
       if (p.roundStart >= left && p.roundStart <= right) {
         const xs = xOf(p.roundStart, left, plotW);
         ctx.strokeStyle = "#4b5a68";
@@ -250,7 +250,7 @@ export function MarketChart({
       // price line: fixed history samples + one animated live endpoint
       const lineColor = livePrice >= (p.roundOpen || livePrice) ? UP : DOWN;
       ctx.strokeStyle = lineColor;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = cssW < 680 ? 1.3 : 1.7;
       ctx.lineJoin = "round";
       ctx.beginPath();
       let pen = false;
@@ -266,7 +266,9 @@ export function MarketChart({
       if (livePrice > 0) ctx.lineTo(xOf(right, left, plotW), yOf(livePrice, plotH));
       ctx.stroke();
 
-      // order markers — only those still inside the rolling window
+      // order markers — only those still inside the rolling window.
+      // Mobile keeps it minimal (small dots only); desktop adds a compact label.
+      const compact = cssW < 680;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
       for (let i = 0; i < p.orders.length; i += 1) {
@@ -278,11 +280,13 @@ export function MarketChart({
         const col = o.side === "up" ? UP : DOWN;
         ctx.fillStyle = col;
         ctx.beginPath();
-        ctx.arc(x, y, 3.4, 0, Math.PI * 2);
+        ctx.arc(x, y, compact ? 2.6 : 3.4, 0, Math.PI * 2);
         ctx.fill();
-        ctx.font = "10px SFMono-Regular, Consolas, monospace";
-        ctx.fillText(`${o.side === "up" ? "涨" : "跌"} ${o.stake} @${o.lockedOdds.toFixed(2)}`, x, y - 6);
-        ctx.font = "11px SFMono-Regular, Consolas, monospace";
+        if (!compact) {
+          ctx.font = "10px SFMono-Regular, Consolas, monospace";
+          ctx.fillText(`${o.side === "up" ? "涨" : "跌"} ${o.stake} @${o.lockedOdds.toFixed(2)}`, x, y - 6);
+          ctx.font = "11px SFMono-Regular, Consolas, monospace";
+        }
       }
 
       // live dot + current-price tag pinned to the right edge
