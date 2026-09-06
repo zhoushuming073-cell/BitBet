@@ -10,9 +10,26 @@ export interface ClosedCandle {
   closed: boolean;
 }
 
+/** Binance GET /api/v3/aggTrades row (aggregated trade). */
+export interface AggTrade {
+  a: number; // aggregate trade id
+  p: string; // price
+  q: string; // quantity
+  f: number; // first trade id
+  l: number; // last trade id
+  T: number; // trade time (ms)
+  m: boolean; // buyer is maker
+  M: boolean; // best price match
+}
+
 const REST_ENDPOINTS = [
   "https://data-api.binance.vision/api/v3/klines",
   "https://api.binance.com/api/v3/klines",
+];
+
+const AGG_TRADES_ENDPOINTS = [
+  "https://data-api.binance.vision/api/v3/aggTrades",
+  "https://api.binance.com/api/v3/aggTrades",
 ];
 
 const WS_ENDPOINTS = [
@@ -197,6 +214,34 @@ export class BinanceFeedManager {
       }
     }
     throw lastError instanceof Error ? lastError : new Error("kline fetch failed");
+  }
+
+  /**
+   * Recent aggregated trade history (ms range) — used to seed the high-frequency
+   * 1-minute chart on first load and to backfill gaps after a reconnect.
+   */
+  static async fetchAggTrades(
+    startTime: number,
+    endTime: number,
+    limit = 1000,
+  ): Promise<AggTrade[]> {
+    const params = new URLSearchParams({
+      symbol: "BTCUSDT",
+      startTime: String(startTime),
+      endTime: String(endTime),
+      limit: String(Math.min(Math.max(limit, 1), 1000)),
+    });
+    let lastError: unknown = null;
+    for (const base of AGG_TRADES_ENDPOINTS) {
+      try {
+        const res = await fetch(`${base}?${params}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`aggTrades ${res.status}`);
+        return (await res.json()) as AggTrade[];
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("aggTrades fetch failed");
   }
 
   /** Official open/close of one 5m candle once it has closed. */

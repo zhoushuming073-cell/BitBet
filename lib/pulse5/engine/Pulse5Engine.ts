@@ -4,6 +4,7 @@ import { VolatilityEstimator } from "../market/VolatilityEstimator";
 import { evaluateMarket, executeVirtualBook, isSideQuotable } from "../market/MarketMaker";
 import { QuoteService } from "../market/QuoteService";
 import { syntheticLiquidity } from "../market/InventoryModel";
+import { BUFFER_WINDOW_MS, mergePricePoints, normalizeTimestamp } from "../market/priceBuffer";
 import { OrderService } from "../orders/OrderService";
 import { LedgerStore, money, type LedgerPersister } from "../orders/LedgerStore";
 import { buildPosition } from "../orders/PositionService";
@@ -86,21 +87,41 @@ export class Pulse5Engine {
     this.connected = connected;
   }
 
-  // Chart price buffer only — retained across round boundaries so the rolling
-  // curve never clears on a new round. Holds ~300s at the 200ms chart sample
-  // rate; the viewport itself (last 120s) is applied in the chart component.
-  private static readonly CHART_BUFFER = 1500;
-  private static readonly CHART_TRIM_TO = 1440;
-
+  // Chart price buffer — a single unified rolling series. It is NEVER cleared on
+  // round boundaries, resets or reconnects: history + live trades merge into one
+  // time-ascending buffer (~90s) that persists across 5m rounds.
   seedChart(points: PricePointLike[]): void {
-    this.points = points.slice(-Pulse5Engine.CHART_BUFFER);
+    this.points = mergePricePoints([], points);
+  }
+
+  /** Merge REST backfill (aggTrades) into the existing buffer without clearing it. */
+  mergeChart(points: PricePointLike[]): void {
+    const before = this.points.length;
+    this.points = mergePricePoints(this.points, points);
+    if (before > 0 && this.points.length === 0) {
+      console.warn("[chart] price buffer unexpectedly became empty");
+    }
   }
 
   appendPoint(point: PricePointLike): void {
-    this.points.push(point);
-    if (this.points.length > Pulse5Engine.CHART_BUFFER) {
-      this.points = this.points.slice(-Pulse5Engine.CHART_TRIM_TO);
-    }
+    const time = normalizeTimestamp(point.time);
+    const price = point.price;
+    if (!Number.isFinite(price) || price <= 0 || time <= 0) return;
+
+    const last = this.points[this.points.length - 1];
+    // Live trades are monotonic; ignore out-of-order or duplicate timestamps.
+    if (last && time <= last.time) return;
+
+    this.points.push({ time, price });
+    this.trimBuffer(time);
+  }
+
+  private trimBuffer(now: number): void {
+    const cutoff = now - BUFFER_WINDOW_MS;
+    if (!this.points.length || this.points[0].time >= cutoff) return;
+    let i = 0;
+    while (i < this.points.length && this.points[i].time < cutoff) i += 1;
+    if (i > 0) this.points = this.points.slice(i);
   }
 
   seedVolatility(closes: number[]): void {

@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import type { Order, PricePoint } from "./types";
 import { CHART_CONFIG as C, VISIBLE_WINDOW_MS, clamp01, easeOutCubic } from "./chartConfig";
 import { lowerBound, rangeFromExtents, smoothRange } from "./chartScale";
+import { drawSmoothPath, type ChartPoint } from "./chartSmoothing";
 
 const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const UP = "#37d67a";
@@ -53,8 +54,12 @@ export function MarketChart({
   // Latest React props are mirrored into a ref so the 60fps loop never triggers
   // (or waits on) a React re-render.
   const propsRef = useRef({ points, price, roundOpen, roundStart, connected, orders });
+  // Keep the last non-empty series so a transient empty update never blanks the
+  // chart (UI resilience — the data layer must still be fixed, not just masked).
+  const lastValidRef = useRef<PricePoint[]>([]);
   useEffect(() => {
     propsRef.current = { points, price, roundOpen, roundStart, connected, orders };
+    if (points.length > 0) lastValidRef.current = points;
   });
 
   const rising = !roundOpen || price >= roundOpen;
@@ -140,12 +145,16 @@ export function MarketChart({
       const plotW = Math.max(1, cssW - PAD_L - PAD_R);
       const plotH = Math.max(1, cssH - PAD_T - PAD_B);
 
-      // ---- 3. visible history + target Y range (single pass, no array copies) ----
-      const startIdx = lowerBound(p.points, left);
+      // ---- 3. resolve visible series + target Y range (single pass) ----
+      let sourcePoints = p.points;
+      if (sourcePoints.length === 0 && lastValidRef.current.length > 0) {
+        sourcePoints = lastValidRef.current;
+      }
+      const startIdx = lowerBound(sourcePoints, left);
       let rawMin = Infinity;
       let rawMax = -Infinity;
-      for (let i = startIdx; i < p.points.length; i += 1) {
-        const v = p.points[i].price;
+      for (let i = startIdx; i < sourcePoints.length; i += 1) {
+        const v = sourcePoints[i].price;
         if (v < rawMin) rawMin = v;
         if (v > rawMax) rawMax = v;
       }
@@ -247,24 +256,26 @@ export function MarketChart({
         ctx.setLineDash([]);
       }
 
-      // price line: fixed history samples + one animated live endpoint
+      // price line: fixed history samples + one animated live endpoint, drawn as
+      // a single monotone-cubic path (no per-segment stroke → no seams, no overshoot).
       const lineColor = livePrice >= (p.roundOpen || livePrice) ? UP : DOWN;
       ctx.strokeStyle = lineColor;
       ctx.lineWidth = cssW < 680 ? 1.3 : 1.7;
       ctx.lineJoin = "round";
-      ctx.beginPath();
-      let pen = false;
-      for (let i = startIdx; i < p.points.length; i += 1) {
-        const s = p.points[i];
-        const x = xOf(s.time, left, plotW);
-        const y = yOf(s.price, plotH);
-        if (!pen) {
-          ctx.moveTo(x, y);
-          pen = true;
-        } else ctx.lineTo(x, y);
+      ctx.lineCap = "round";
+
+      const curvePts: ChartPoint[] = [];
+      for (let i = startIdx; i < sourcePoints.length; i += 1) {
+        const s = sourcePoints[i];
+        curvePts.push({ x: xOf(s.time, left, plotW), y: yOf(s.price, plotH) });
       }
-      if (livePrice > 0) ctx.lineTo(xOf(right, left, plotW), yOf(livePrice, plotH));
-      ctx.stroke();
+      if (livePrice > 0) curvePts.push({ x: xOf(right, left, plotW), y: yOf(livePrice, plotH) });
+
+      if (curvePts.length > 0) {
+        ctx.beginPath();
+        drawSmoothPath(ctx, curvePts);
+        ctx.stroke();
+      }
 
       // order markers — only those still inside the rolling window.
       // Mobile keeps it minimal (small dots only); desktop adds a compact label.

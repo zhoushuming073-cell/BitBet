@@ -1,6 +1,7 @@
 import { GAME_CONFIG } from "../game/gameConfig";
 import { roundFor } from "../game/RoundEngine";
 import { BinanceFeedManager } from "../market/BinanceFeedManager";
+import { BUFFER_WINDOW_MS, bucketAggTrades } from "../market/priceBuffer";
 import { Pulse5Engine } from "./Pulse5Engine";
 import type { LedgerPersister } from "../orders/LedgerStore";
 import type { LedgerSnapshot } from "./types";
@@ -41,6 +42,7 @@ export function createBrowserEngine(): BrowserRuntime {
 
   let lastRoundId = -1;
   let lastChartTs = 0;
+  let lastFeedTs = 0; // last time any live feed frame arrived (local ms)
   // Chart history is committed at ~5/s; the 60fps interpolation lives in the
   // chart view. Volatility sampling keeps its own 1s cadence in the engine.
   const CHART_SAMPLE_MS = 200;
@@ -64,14 +66,17 @@ export function createBrowserEngine(): BrowserRuntime {
 
   const feed = new BinanceFeedManager({
     onBook: (bid, ask, ts) => {
+      lastFeedTs = Date.now();
       engine.onBookTicker(bid, ask, ts);
       requestFlush();
     },
     onTrade: (price, ts) => {
+      lastFeedTs = Date.now();
       engine.onTrade(price, ts);
       requestFlush();
     },
     onKline: (openTime, open, _close, closed) => {
+      lastFeedTs = Date.now();
       // The WS 5m candle gives the official open the instant a round starts,
       // so the new round never has to wait on a REST round-trip to render.
       engine.setRoundOpen(openTime, open);
@@ -80,11 +85,19 @@ export function createBrowserEngine(): BrowserRuntime {
       requestFlush();
     },
     onTicker: (ticker, ts) => {
+      lastFeedTs = Date.now();
       engine.onTicker24h(ticker);
       engine.onTrade(ticker.price, ts);
       requestFlush();
     },
-    onStatus: (connected) => engine.setConnected(connected),
+    onStatus: (connected) => {
+      engine.setConnected(connected);
+      // Reconnected after a gap → backfill the missing history so the curve has
+      // no hole. The merge dedups against points already in the buffer.
+      if (connected && lastFeedTs > 0 && Date.now() - lastFeedTs > 3000) {
+        void backfillGap();
+      }
+    },
   });
 
   async function ensureRoundOpen(roundId: number): Promise<void> {
@@ -125,6 +138,17 @@ export function createBrowserEngine(): BrowserRuntime {
     }
   }
 
+  /** Backfill the chart gap after a reconnect using recent aggTrades. */
+  async function backfillGap(): Promise<void> {
+    const now = Date.now();
+    try {
+      const trades = await BinanceFeedManager.fetchAggTrades(now - BUFFER_WINDOW_MS, now);
+      if (!disposed) engine.mergeChart(bucketAggTrades(trades));
+    } catch {
+      /* ignore — live feed keeps appending */
+    }
+  }
+
   const clock = window.setInterval(() => {
     const now = Date.now();
     const round = roundFor(now);
@@ -143,16 +167,37 @@ export function createBrowserEngine(): BrowserRuntime {
 
   // Initial data bootstrap.
   void (async () => {
+    const now = Date.now();
+
+    // 1) Chart history: dense aggTrades bucketed to ~250ms. Falls back to sparse
+    //    1m klines only if aggTrades fails — and never clears existing points.
+    try {
+      const trades = await BinanceFeedManager.fetchAggTrades(now - 70_000, now);
+      if (!disposed) {
+        const points = bucketAggTrades(trades);
+        engine.seedChart(points);
+        console.log(`[chart] history loaded: ${points.length} points`);
+      }
+    } catch {
+      try {
+        const rows = await BinanceFeedManager.fetchKlines("1m", 3);
+        if (!disposed) {
+          engine.seedChart(rows.map((row) => ({ time: Number(row[0]), price: Number(row[4]) })));
+        }
+      } catch {
+        /* live feed will still populate the chart */
+      }
+    }
+
+    // 2) Volatility warm-up: 1m klines (separate from the chart series).
     try {
       const rows = await BinanceFeedManager.fetchKlines("1m", 80);
-      if (disposed) return;
-      const points = rows.map((row) => ({ time: row[0], price: Number(row[4]) }));
-      engine.seedChart(points);
-      engine.seedVolatility(rows.map((row) => Number(row[4])));
+      if (!disposed) engine.seedVolatility(rows.map((row) => Number(row[4])));
     } catch {
       /* live feed will still warm the estimator over time */
     }
-    ensureRoundOpen(roundFor(Date.now()).id);
+
+    ensureRoundOpen(roundFor(now).id);
   })();
 
   feed.start();
