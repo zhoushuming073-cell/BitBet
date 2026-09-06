@@ -7,6 +7,7 @@ import { syntheticLiquidity } from "../market/InventoryModel";
 import { BUFFER_WINDOW_MS, mergePricePoints, normalizeTimestamp } from "../market/priceBuffer";
 import { OrderService } from "../orders/OrderService";
 import { LedgerStore, money, type LedgerPersister } from "../orders/LedgerStore";
+import type { GameStateStore } from "../orders/GameStateStore";
 import { buildPosition } from "../orders/PositionService";
 import { settleRound, type SettleOutcome } from "../settlement/SettlementService";
 import { EngineError, ErrorCode, type ErrorCodeType } from "./errors";
@@ -56,7 +57,7 @@ export interface EngineView {
 const EMPTY_TICKER: Ticker24h = { price: 0, change: 0, high: 0, low: 0, volume: 0, quoteVolume: 0 };
 
 export class Pulse5Engine {
-  readonly ledger: LedgerStore;
+  readonly ledger: GameStateStore;
   readonly estimator = new VolatilityEstimator();
   private readonly quoteService = new QuoteService();
   private readonly orderService = new OrderService();
@@ -78,8 +79,8 @@ export class Pulse5Engine {
   private view: EngineView | null = null;
   private listeners = new Set<Listener>();
 
-  constructor(persister: LedgerPersister | null = null) {
-    this.ledger = new LedgerStore(persister);
+  constructor(storeOrPersister: GameStateStore | LedgerPersister | null = null) {
+    this.ledger = isGameStateStore(storeOrPersister) ? storeOrPersister : new LedgerStore(storeOrPersister);
   }
 
   // ---------------- feed ingestion ----------------
@@ -475,3 +476,7 @@ export class Pulse5Engine {
 
 // Re-export for convenience.
 export type { PricePointLike } from "./types";
+
+function isGameStateStore(x: GameStateStore | LedgerPersister | null): x is GameStateStore {
+  return x !== null && typeof (x as GameStateStore).balance === "number" && Array.isArray((x as GameStateStore).orders);
+}

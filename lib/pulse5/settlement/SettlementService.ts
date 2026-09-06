@@ -1,8 +1,9 @@
 import type { Order, RoundResult, RoundPortfolioSummary } from "../engine/types";
-import { money, type LedgerStore } from "../orders/LedgerStore";
+import { money } from "../orders/LedgerStore";
+import type { GameStateStore } from "../orders/GameStateStore";
 
 export interface SettleInput {
-  ledger: LedgerStore;
+  ledger: GameStateStore;
   roundId: number;
   /** Official 5m kline open/close (settlement is separate from live odds). */
   openPrice: number;

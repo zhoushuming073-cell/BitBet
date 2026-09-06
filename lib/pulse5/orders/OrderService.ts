@@ -1,7 +1,7 @@
 import { GAME_CONFIG } from "../game/gameConfig";
 import { EngineError, ErrorCode, type ErrorCodeType } from "../engine/errors";
 import type { Order, Quote } from "../engine/types";
-import type { LedgerStore } from "./LedgerStore";
+import type { GameStateStore } from "./GameStateStore";
 
 export interface BettingGate {
   canBet: boolean;
@@ -9,7 +9,7 @@ export interface BettingGate {
 }
 
 export interface PlaceOrderInput {
-  ledger: LedgerStore;
+  ledger: GameStateStore;
   /**
    * Freshly built executable quote at order time (latest market). Orders are
    * placed by amount and always filled against the market at the click moment,

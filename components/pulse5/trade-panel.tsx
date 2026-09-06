@@ -5,7 +5,6 @@ import { ArrowDown, ArrowUp, CircleCheck, LockKeyhole, TriangleAlert } from "luc
 import { Input } from "@/components/ui/input";
 import { GAME_CONFIG } from "@/lib/pulse5/game/gameConfig";
 import type { Pulse5Engine, EngineView } from "@/lib/pulse5/engine/Pulse5Engine";
-import { EngineError } from "@/lib/pulse5/engine/errors";
 import type { Side } from "@/lib/pulse5/engine/types";
 
 const money = new Intl.NumberFormat("en-US", {
@@ -55,11 +54,22 @@ function roundToTens(value: number) {
   return Math.round(value / 10) * 10;
 }
 
-export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: EngineView }) {
+export function TradePanel({
+  engine,
+  view,
+  balance,
+  onSubmit,
+}: {
+  engine: Pulse5Engine;
+  view: EngineView;
+  balance: number;
+  onSubmit?: (side: Side, stake: number) => Promise<void>;
+}) {
   const [side, setSide] = useState<Side>("up");
   const [stake, setStake] = useState("100");
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const amount = Math.round((Number(stake) || 0) * 100) / 100;
   const validAmount = Number.isFinite(amount) && amount >= GAME_CONFIG.MIN_BET;
@@ -82,7 +92,7 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
     view.bettingState === "OK" &&
     !sideBlocked &&
     Boolean(estimate?.quotable) &&
-    amount <= view.balance + 1e-9;
+    amount <= balance + 1e-9;
 
   const roundLabel = new Date(view.round.id).toLocaleTimeString("zh-CN", {
     hour: "2-digit",
@@ -92,7 +102,7 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
 
   // Current balance plus this round's committed amount reconstructs the balance
   // at the start of the round, so quick amounts stay stable after a prediction.
-  const roundStartingBalance = view.balance + view.position.totalInvested;
+  const roundStartingBalance = balance + view.position.totalInvested;
   const quickAmounts = [0.1, 0.25, 0.5].map((ratio) => ({
     ratio,
     value: roundToTens(roundStartingBalance * ratio),
@@ -105,32 +115,34 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
   };
 
   const setQuickAmount = (value: number) => {
-    setStake(String(Math.min(value, roundAmount(view.balance))));
+    setStake(String(Math.min(value, roundAmount(balance))));
     setMessage("");
     setSuccess(false);
   };
 
-  const submit = () => {
-    const now = Date.now();
+  const submit = async () => {
     if (!(amount >= GAME_CONFIG.MIN_BET)) {
       setSuccess(false);
       setMessage(`竞猜金额最低为 ${GAME_CONFIG.MIN_BET} USDT`);
       return;
     }
-    if (amount > view.balance + 1e-9) {
+    if (amount > balance + 1e-9) {
       setSuccess(false);
       setMessage("虚拟余额不足");
       return;
     }
+    if (!onSubmit) return;
 
+    setSubmitting(true);
     try {
-      const idempotencyKey = `${now.toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
-      engine.placeOrder(side, amount, idempotencyKey, now);
+      await onSubmit(side, amount);
       setSuccess(true);
       setMessage(`已提交${side === "up" ? "看涨" : "看跌"}竞猜，本轮结束后自动结算`);
     } catch (error) {
       setSuccess(false);
-      setMessage(error instanceof EngineError ? error.message : "提交失败，请重试");
+      setMessage(error instanceof Error ? error.message : "提交失败，请重试");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -180,7 +192,7 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
             {quickMoney.format(value)}
           </button>
         ))}
-        <button type="button" onClick={() => setQuickAmount(view.balance)}>全仓</button>
+        <button type="button" onClick={() => setQuickAmount(balance)}>全仓</button>
       </div>
 
       <div className="side-choice" aria-label="选择竞猜方向">
@@ -220,10 +232,10 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
         type="button"
         className="submit-prediction"
         onClick={submit}
-        disabled={!canPredict}
+        disabled={!canPredict || submitting}
         data-testid="submit-order"
       >
-        {locked ? "本轮已停止" : `确认${side === "up" ? "看涨" : "看跌"}`}
+        {submitting ? "提交中…" : locked ? "本轮已停止" : `确认${side === "up" ? "看涨" : "看跌"}`}
       </button>
 
       {(message || unavailableMessage) ? (

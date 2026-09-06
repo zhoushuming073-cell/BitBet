@@ -1,5 +1,6 @@
 import { GAME_CONFIG } from "../game/gameConfig";
 import type { LedgerSnapshot, Order, RoundRecord } from "../engine/types";
+import type { GameStateStore } from "./GameStateStore";
 
 export interface LedgerPersister {
   load(): LedgerSnapshot | null;
@@ -24,7 +25,7 @@ export function emptySnapshot(): LedgerSnapshot {
  * rounds live here; persistence is injected so the same code runs in the
  * browser (localStorage) and under unit tests (in-memory).
  */
-export class LedgerStore {
+export class LedgerStore implements GameStateStore {
   balance: number;
   orders: Order[];
   rounds: Map<string, RoundRecord>;

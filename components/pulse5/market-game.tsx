@@ -4,11 +4,23 @@ import { useEffect, useState } from "react";
 import { Bitcoin, RotateCcw, ShieldCheck, Wifi, WifiOff } from "lucide-react";
 import { createBrowserEngine, type BrowserRuntime } from "@/lib/pulse5/engine/createBrowserEngine";
 import type { EngineView } from "@/lib/pulse5/engine/Pulse5Engine";
+import type { Side } from "@/lib/pulse5/engine/types";
 import { TradePanel } from "./trade-panel";
 import { HistoryTable } from "./history-table";
 import { OpenOrders } from "./open-orders";
 import { MarketChart } from "./market-chart";
 import { RoundResultToast } from "./round-result-toast";
+import { AccountEntry } from "@/components/account/account-entry";
+import { useAccount } from "@/components/account/use-account";
+import { GameCoordinator } from "@/services/game-coordinator";
+import {
+  fetchState,
+  placeOrder,
+  claim as claimApi,
+  claimAll as claimAllApi,
+  settle as settleApi,
+  type AuthorityState,
+} from "@/lib/game/client";
 
 const money = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
@@ -24,6 +36,36 @@ function formatCountdown(seconds: number) {
 export function MarketGame() {
   const [runtime, setRuntime] = useState<BrowserRuntime | null>(null);
   const [view, setView] = useState<EngineView | null>(null);
+  const { account } = useAccount();
+
+  // Authoritative state lives on the GameServer (balance / orders / claim). The
+  // browser engine only supplies live market data + indicative odds preview.
+  const [authority, setAuthority] = useState<AuthorityState | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchState()
+      .then((state) => {
+        if (alive) setAuthority(state);
+      })
+      .catch(() => {
+        /* server not ready — UI falls back to the browser engine view */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const reloadAuthority = async () => {
+    const state = await fetchState().catch(() => null);
+    if (state) setAuthority(state);
+  };
+
+  const [coordinator] = useState<GameCoordinator>(() => new GameCoordinator());
+
+  useEffect(() => {
+    coordinator.setUserId(account?.userId ?? null);
+  }, [account, coordinator]);
 
   useEffect(() => {
     const nextRuntime = createBrowserEngine();
@@ -41,19 +83,40 @@ export function MarketGame() {
     };
   }, []);
 
+  // On a settled round: mirror to the account layer AND the authoritative server.
+  useEffect(() => {
+    const roundId = view?.lastSettlement?.roundId;
+    if (roundId == null) return;
+    const engineRound = view?.roundSummaries.find((r) => r.id === roundId);
+    if (!engineRound) return;
+    const settledOrders = (view?.settledOrders ?? []).filter((o) => o.roundId === roundId);
+    coordinator?.onRoundSettled(engineRound, settledOrders);
+    if (engineRound.openPrice > 0 && engineRound.closePrice != null && engineRound.closePrice > 0) {
+      void settleApi(roundId, engineRound.openPrice, engineRound.closePrice).then(() => reloadAuthority());
+    }
+  }, [view?.lastSettlement, view?.roundSummaries, view?.settledOrders, coordinator]);
+
+  const handleSubmit = async (side: Side, stake: number) => {
+    const now = Date.now();
+    const idempotencyKey = `${now.toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+    const { order } = await placeOrder(side, stake, view?.market?.midPrice ?? 0, idempotencyKey);
+    coordinator.onOrderPlaced(order);
+    await reloadAuthority();
+  };
+
   const resetGame = () => {
     if (!runtime) return;
     if (window.confirm("确定重置虚拟余额和竞猜记录吗？")) runtime.engine.reset();
   };
 
-  const claimOrder = (orderId: string) => {
-    if (!runtime) return;
-    runtime.engine.claimOrder(orderId);
+  const claimOrder = async (orderId: string) => {
+    await claimApi(orderId);
+    await reloadAuthority();
   };
 
-  const claimAll = () => {
-    if (!runtime) return;
-    runtime.engine.claimAll();
+  const claimAll = async () => {
+    await claimAllApi();
+    await reloadAuthority();
   };
 
   if (!view || !runtime) {
@@ -74,6 +137,13 @@ export function MarketGame() {
   const differencePercent = openPrice ? (difference / openPrice) * 100 : 0;
   const rising = difference >= 0;
 
+  // Authoritative data wins when the server is reachable; otherwise fall back to
+  // the browser engine view (dev / offline).
+  const balance = authority?.balance ?? view.balance;
+  const openOrders = authority?.openOrders ?? view.openOrders;
+  const settledOrders = authority?.settledOrders ?? view.settledOrders;
+  const claimable = authority?.claimable ?? view.claimable;
+
   return (
     <main className="app-shell">
       <RoundResultToast notice={view.lastSettlement} onClaim={claimAll} />
@@ -90,8 +160,9 @@ export function MarketGame() {
           </div>
           <div className="balance">
             <span>虚拟余额</span>
-            <strong>{money.format(view.balance)} <small>USDT</small></strong>
+            <strong>{money.format(balance)} <small>USDT</small></strong>
           </div>
+          <AccountEntry />
           <button className="reset-button" type="button" onClick={resetGame} aria-label="重置虚拟余额和竞猜记录">
             <RotateCcw aria-hidden="true" />
             <span>重置</span>
@@ -126,17 +197,17 @@ export function MarketGame() {
               roundOpen={openPrice}
               roundStart={view.round.id}
               connected={view.connected}
-              orders={view.openOrders}
+              orders={openOrders}
             />
           </section>
 
-          <TradePanel engine={runtime.engine} view={view} />
+          <TradePanel engine={runtime.engine} view={view} balance={balance} onSubmit={handleSubmit} />
         </div>
 
-        <OpenOrders orders={view.openOrders} />
+        <OpenOrders orders={openOrders} />
         <HistoryTable
-          orders={view.settledOrders}
-          claimable={view.claimable}
+          orders={settledOrders}
+          claimable={claimable}
           onClaim={claimOrder}
           onClaimAll={claimAll}
         />
