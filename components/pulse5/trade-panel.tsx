@@ -45,6 +45,16 @@ function roundAmount(value: number) {
   return Math.floor(value * 100) / 100;
 }
 
+/**
+ * Quick-amount rounding: snap to the nearest 10 so the ones digit reads "0"
+ * (and tiny values just drop the decimal tail). Keeps the quick buttons tidy.
+ */
+function roundToTens(value: number) {
+  if (!(value > 0)) return 0;
+  if (value < 10) return Math.round(value);
+  return Math.round(value / 10) * 10;
+}
+
 export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: EngineView }) {
   const [side, setSide] = useState<Side>("up");
   const [stake, setStake] = useState("100");
@@ -85,7 +95,7 @@ export function TradePanel({ engine, view }: { engine: Pulse5Engine; view: Engin
   const roundStartingBalance = view.balance + view.position.totalInvested;
   const quickAmounts = [0.1, 0.25, 0.5].map((ratio) => ({
     ratio,
-    value: roundAmount(roundStartingBalance * ratio),
+    value: roundToTens(roundStartingBalance * ratio),
   }));
 
   const chooseSide = (nextSide: Side) => {
