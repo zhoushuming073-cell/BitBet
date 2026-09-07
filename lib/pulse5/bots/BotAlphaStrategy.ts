@@ -16,7 +16,6 @@ export class BotAlphaStrategy implements BotStrategy {
   readonly label = "趋势跟随";
 
   decide(context: BotDecisionContext): BotDecision {
-    if (context.hasOpenOrder) return SKIP("本轮已经出手");
     const duration = context.round.end - context.round.start;
     const progress = (context.now - context.round.start) / duration;
     const timingNoise = (roundNoise(context.round.id, 101) - 0.5) * config.timingJitter * 2;

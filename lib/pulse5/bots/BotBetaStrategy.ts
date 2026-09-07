@@ -16,7 +16,6 @@ export class BotBetaStrategy implements BotStrategy {
   readonly label = "均值回归";
 
   decide(context: BotDecisionContext): BotDecision {
-    if (context.hasOpenOrder) return SKIP("本轮已经出手");
     const streak = resultStreak(context.recentResults);
     const previousRound = context.recentResults[0];
     if (previousRound?.profit < 0 && previousRound.roundId === context.round.id - 5 * 60 * 1000) {

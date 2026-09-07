@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import type { Order, PricePoint } from "./types";
 import { CHART_CONFIG as C, VISIBLE_WINDOW_MS, clamp01, easeOutCubic } from "./chartConfig";
+import { CHART_DISPLAY_CONFIG, buildMobileDisplaySeries } from "./chartDisplay";
 import { lowerBound, rangeFromExtents, smoothRange } from "./chartScale";
 import { drawSmoothPath, type ChartPoint } from "./chartSmoothing";
 
@@ -137,12 +138,13 @@ export function MarketChart({
         const t = clamp01((perfNow - anim.startPerf) / anim.duration);
         anim.rendered = anim.startPrice + (anim.targetPrice - anim.startPrice) * easeOutCubic(t);
       }
-      const livePrice = anim.rendered || p.price || 0;
-
       // ---- 2. continuous 1-minute sliding window (wall-clock right edge) ----
       const right = Date.now();
       const left = right - VISIBLE_WINDOW_MS;
       const compact = cssW < 260;
+      // On mobile, the current label and curve endpoint use the real latest
+      // market price. Desktop retains the short visual interpolation.
+      const livePrice = compact ? p.price || anim.rendered || 0 : anim.rendered || p.price || 0;
       const padRight = compact ? 58 : PAD_R;
       const plotW = Math.max(1, cssW - PAD_L - padRight);
       const plotH = Math.max(1, cssH - PAD_T - PAD_B);
@@ -153,14 +155,23 @@ export function MarketChart({
         sourcePoints = lastValidRef.current;
       }
       const startIdx = lowerBound(sourcePoints, left);
+      const displayPoints = compact
+        ? buildMobileDisplaySeries(sourcePoints, left, right, p.price).points
+        : sourcePoints.slice(startIdx);
       let rawMin = Infinity;
       let rawMax = -Infinity;
-      for (let i = startIdx; i < sourcePoints.length; i += 1) {
-        const v = sourcePoints[i].price;
+      for (let i = 0; i < displayPoints.length; i += 1) {
+        const v = displayPoints[i].price;
         if (v < rawMin) rawMin = v;
         if (v > rawMax) rawMax = v;
       }
-      const target = rangeFromExtents({ visibleMin: rawMin, visibleMax: rawMax, roundOpen: p.roundOpen, livePrice });
+      const target = rangeFromExtents({
+        visibleMin: rawMin,
+        visibleMax: rawMax,
+        roundOpen: p.roundOpen,
+        livePrice,
+        minimumRangePercent: compact ? CHART_DISPLAY_CONFIG.MOBILE_MIN_RANGE_PERCENT : C.MIN_RANGE_PERCENT,
+      });
       if (!target) {
         raf = requestAnimationFrame(frame);
         return;
@@ -264,8 +275,8 @@ export function MarketChart({
         ctx.setLineDash([]);
       }
 
-      // price line: fixed history samples + one animated live endpoint, drawn as
-      // a single monotone-cubic path (no per-segment stroke → no seams, no overshoot).
+      // Mobile draws the resampled display copy with straight segments, which
+      // cannot overshoot. Desktop keeps the existing monotone cubic rendering.
       const lineColor = livePrice >= (p.roundOpen || livePrice) ? UP : DOWN;
       ctx.strokeStyle = lineColor;
       ctx.lineWidth = cssW < 680 ? 1.3 : 1.7;
@@ -273,15 +284,20 @@ export function MarketChart({
       ctx.lineCap = "round";
 
       const curvePts: ChartPoint[] = [];
-      for (let i = startIdx; i < sourcePoints.length; i += 1) {
-        const s = sourcePoints[i];
+      for (let i = 0; i < displayPoints.length; i += 1) {
+        const s = displayPoints[i];
         curvePts.push({ x: xOf(s.time, left, plotW), y: yOf(s.price, plotH) });
       }
-      if (livePrice > 0) curvePts.push({ x: xOf(right, left, plotW), y: yOf(livePrice, plotH) });
+      if (!compact && livePrice > 0) curvePts.push({ x: xOf(right, left, plotW), y: yOf(livePrice, plotH) });
 
       if (curvePts.length > 0) {
         ctx.beginPath();
-        drawSmoothPath(ctx, curvePts);
+        if (compact) {
+          ctx.moveTo(curvePts[0].x, curvePts[0].y);
+          for (let i = 1; i < curvePts.length; i += 1) ctx.lineTo(curvePts[i].x, curvePts[i].y);
+        } else {
+          drawSmoothPath(ctx, curvePts);
+        }
         ctx.stroke();
       }
 

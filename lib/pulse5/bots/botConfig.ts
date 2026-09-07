@@ -14,6 +14,8 @@ export const BOT_ALPHA_CONFIG = {
   maxRisk: 0.07,
   lossRiskReduction: 0.015,
   skipRoundChance: 0.08,
+  /** Multiple entries are allowed, with time for a genuinely new signal. */
+  orderCooldownMs: 24_000,
 } as const;
 
 export const BOT_BETA_CONFIG = {
@@ -32,4 +34,5 @@ export const BOT_BETA_CONFIG = {
   lossRiskReduction: 0.01,
   skipRoundChance: 0.22,
   strongTrendTickRatio: 0.76,
+  orderCooldownMs: 36_000,
 } as const;

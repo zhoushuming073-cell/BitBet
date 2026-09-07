@@ -26,7 +26,9 @@ export interface BotDecisionContext {
   executionOdds: Record<Side, number | null>;
   availableBalance: number;
   recentResults: BotPastResult[];
-  hasOpenOrder: boolean;
+  openOrderCount: number;
+  lastOrderAt: number | null;
+  lastOrderSide: Side | null;
 }
 
 export interface BotDecision {

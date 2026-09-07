@@ -19,24 +19,29 @@ export interface TradingBotState {
 interface BotRuntime {
   definition: BotDefinition;
   runtime: BrowserRuntime;
-  actedRounds: Set<number>;
+  orderSequence: number;
+  lastOrderAtByRound: Map<number, number>;
   lastAction: string;
 }
 
 function pastResults(orders: Order[], currentRoundId: number) {
-  return orders
+  const byRound = new Map<number, { roundId: number; profit: number; settledAt: number }>();
+  for (const order of orders
     .filter((order) => (
       order.roundId < currentRoundId
       && order.status !== "OPEN"
       && order.settledAt != null
     ))
-    .sort((a, b) => (b.settledAt ?? 0) - (a.settledAt ?? 0))
-    .slice(0, 6)
-    .map((order) => ({
-      roundId: order.roundId,
-      profit: order.profit,
-      settledAt: order.settledAt!,
-    }));
+    .sort((a, b) => (b.settledAt ?? 0) - (a.settledAt ?? 0))) {
+    const existing = byRound.get(order.roundId);
+    if (existing) {
+      existing.profit += order.profit;
+      existing.settledAt = Math.max(existing.settledAt, order.settledAt!);
+    } else {
+      byRound.set(order.roundId, { roundId: order.roundId, profit: order.profit, settledAt: order.settledAt! });
+    }
+  }
+  return [...byRound.values()].sort((a, b) => b.settledAt - a.settledAt).slice(0, 6);
 }
 
 function legalContext(bot: BotRuntime, botView: EngineView, marketView: EngineView, now: number): BotDecisionContext | null {
@@ -45,6 +50,8 @@ function legalContext(bot: BotRuntime, botView: EngineView, marketView: EngineVi
   const quoteAmount = Math.max(1, Math.min(500, Math.floor(botView.balance * 0.04)));
   const upQuote = bot.runtime.engine.estimateQuote("up", quoteAmount, now);
   const downQuote = bot.runtime.engine.estimateQuote("down", quoteAmount, now);
+  const openOrders = bot.runtime.engine.ledger.openOrdersForRound(marketView.round.id);
+  const lastOrder = openOrders[0] ?? null;
   return {
     now,
     round: {
@@ -64,7 +71,9 @@ function legalContext(bot: BotRuntime, botView: EngineView, marketView: EngineVi
     },
     availableBalance: botView.balance,
     recentResults: pastResults(bot.runtime.engine.ledger.orders, marketView.round.id),
-    hasOpenOrder: bot.runtime.engine.ledger.openOrdersForRound(marketView.round.id).length > 0,
+    openOrderCount: openOrders.length,
+    lastOrderAt: lastOrder?.createdAt ?? null,
+    lastOrderSide: lastOrder?.side ?? null,
   };
 }
 
@@ -80,7 +89,8 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
     const runtimes: BotRuntime[] = BOT_DEFINITIONS.map((definition) => ({
       definition,
       runtime: createBrowserEngine({ storageKey: definition.storageKey, passive: true }),
-      actedRounds: new Set<number>(),
+      orderSequence: 0,
+      lastOrderAtByRound: new Map<number, number>(),
       lastAction: "观察中",
     }));
     const settlingRounds = new Set<number>();
@@ -140,19 +150,30 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
 
         const view = bot.runtime.engine.getView(now);
         const roundId = view.round.id;
-        if (!bot.actedRounds.has(roundId)) {
+        for (const storedRound of bot.lastOrderAtByRound.keys()) {
+          if (storedRound < roundId - 5 * 60 * 1000) bot.lastOrderAtByRound.delete(storedRound);
+        }
+        const latestPersistedOrder = bot.runtime.engine.ledger.openOrdersForRound(roundId)[0];
+        const lastOrderAt = Math.max(
+          bot.lastOrderAtByRound.get(roundId) ?? -Infinity,
+          latestPersistedOrder?.createdAt ?? -Infinity,
+        );
+        const coolingDown = now - lastOrderAt < bot.definition.orderCooldownMs;
+        if (!coolingDown) {
           const context = shared ? legalContext(bot, view, shared, now) : null;
           const decision = context ? bot.definition.strategy.decide(context) : null;
           if (decision?.action === "UP" || decision?.action === "DOWN") {
             try {
+              bot.orderSequence += 1;
               bot.runtime.engine.placeOrder(
                 decision.action === "UP" ? "up" : "down",
                 decision.stake,
-                `bot-${bot.definition.id}-${roundId}`,
+                `bot-${bot.definition.id}-${roundId}-${now}-${bot.orderSequence}`,
                 now,
               );
-              bot.actedRounds.add(roundId);
-              bot.lastAction = `持仓 ${decision.action === "UP" ? "看涨" : "看跌"} ${decision.stake} USDT`;
+              bot.lastOrderAtByRound.set(roundId, now);
+              const count = bot.runtime.engine.ledger.openOrdersForRound(roundId).length;
+              bot.lastAction = `第 ${count} 单 ${decision.action === "UP" ? "看涨" : "看跌"} ${decision.stake} USDT`;
             } catch {
               // The same execution gate as the player is authoritative. Keep
               // retrying during the legal window, but make the state visible.
@@ -160,10 +181,6 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
             }
           } else if (decision) {
             bot.lastAction = decision.reason;
-            if (now >= view.round.start + (view.round.end - view.round.start) * 0.7) {
-              bot.actedRounds.add(roundId);
-              bot.lastAction = "本轮跳过，等待下一轮";
-            }
           }
         }
       }

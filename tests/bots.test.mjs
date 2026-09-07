@@ -20,7 +20,9 @@ function contextFor(roundId, prices, progress) {
     executionOdds: { up: 1.8, down: 2.1 },
     availableBalance: 10_000,
     recentResults: [],
-    hasOpenOrder: false,
+    openOrderCount: 0,
+    lastOrderAt: null,
+    lastOrderSide: null,
   };
 }
 
@@ -69,6 +71,19 @@ test("Bot hook submits through the same engine order API", async () => {
   assert.match(hook, /runtime\.engine\.placeOrder\(/);
   assert.doesNotMatch(hook, /ledger\.balance\s*=/);
   assert.doesNotMatch(contract, /closePrice|settlementResult|futurePrice/);
+});
+
+test("bots may place multiple mixed-direction orders in one round with unique keys", async () => {
+  const fs = await import("node:fs/promises");
+  const hook = await fs.readFile(`${root}/components/pulse5/use-trading-bots.ts`, "utf8");
+  const alpha = await fs.readFile(`${root}/lib/pulse5/bots/BotAlphaStrategy.ts`, "utf8");
+  const beta = await fs.readFile(`${root}/lib/pulse5/bots/BotBetaStrategy.ts`, "utf8");
+  assert.doesNotMatch(hook, /actedRounds/);
+  assert.match(hook, /orderSequence/);
+  assert.match(hook, /orderCooldownMs/);
+  assert.match(hook, /bot-\$\{bot\.definition\.id\}-\$\{roundId\}-\$\{now\}-\$\{bot\.orderSequence\}/);
+  assert.doesNotMatch(alpha, /hasOpenOrder/);
+  assert.doesNotMatch(beta, /hasOpenOrder/);
 });
 
 test("weekly competition exposes no player reset control", async () => {

@@ -32,6 +32,18 @@ test("Case 2: tiny 1-2 USD wiggle is not over-zoomed (minimum range enforced)", 
   assert.ok(r.lo <= 99999 && r.hi >= 100001, "extremes still visible");
 });
 
+test("mobile display floor keeps a tiny BTC wiggle inside a 0.12% viewport", () => {
+  const r = scale.rangeFromExtents({
+    visibleMin: 99999,
+    visibleMax: 100001,
+    roundOpen: 100000,
+    livePrice: 100000,
+    minimumRangePercent: 0.0012,
+  });
+  assert.ok(r.hi - r.lo >= 120 - 1e-9, "mobile span must be at least 0.12% of price");
+  assert.ok(r.lo <= 99999 && r.hi >= 100001, "real extremes still remain visible");
+});
+
 test("Case 3: sudden spike is immediately included in the target range", () => {
   const r = scale.computeTargetRange({ visiblePrices: [100000, 100120, 100500], roundOpen: 100000, livePrice: 100500 });
   assert.ok(r.hi >= 100500);

@@ -32,9 +32,17 @@ export interface ExtentsInput {
   visibleMax: number;
   roundOpen: number;
   livePrice: number;
+  /** Final plotted span floor. Mobile passes a wider display-only value. */
+  minimumRangePercent?: number;
 }
 
-export function rangeFromExtents({ visibleMin, visibleMax, roundOpen, livePrice }: ExtentsInput): PriceRange | null {
+export function rangeFromExtents({
+  visibleMin,
+  visibleMax,
+  roundOpen,
+  livePrice,
+  minimumRangePercent = C.MIN_RANGE_PERCENT,
+}: ExtentsInput): PriceRange | null {
   let rawMin = visibleMin;
   let rawMax = visibleMax;
   if (roundOpen > 0) {
@@ -48,7 +56,10 @@ export function rangeFromExtents({ visibleMin, visibleMax, roundOpen, livePrice 
   if (!Number.isFinite(rawMin) || !Number.isFinite(rawMax)) return null;
 
   const anchor = livePrice || roundOpen || rawMax;
-  const span = Math.max(rawMax - rawMin, anchor * C.MIN_RANGE_PERCENT);
+  // Padding makes the final viewport 1.3x this base span. Divide the floor by
+  // that factor so `minimumRangePercent` describes the final visible range.
+  const paddedFactor = 1 + C.Y_AXIS_PADDING_RATIO * 2;
+  const span = Math.max(rawMax - rawMin, (anchor * minimumRangePercent) / paddedFactor);
   const center = (rawMin + rawMax) / 2;
   const padding = span * C.Y_AXIS_PADDING_RATIO;
   return {
