@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bitcoin, Bot, RotateCcw, ShieldCheck, Wifi, WifiOff } from "lucide-react";
+import { Bitcoin, Bot, ShieldCheck, Wifi, WifiOff } from "lucide-react";
 import { createBrowserEngine, type BrowserRuntime } from "@/lib/pulse5/engine/createBrowserEngine";
 import type { EngineView } from "@/lib/pulse5/engine/Pulse5Engine";
 import type { Side } from "@/lib/pulse5/engine/types";
@@ -50,11 +50,6 @@ export function MarketGame() {
     const idempotencyKey = `${now.toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
     if (!runtime) throw new Error("游戏尚未就绪");
     runtime.engine.placeOrder(side, stake, idempotencyKey, now);
-  };
-
-  const resetGame = () => {
-    if (!runtime) return;
-    if (window.confirm("确定重置虚拟余额和竞猜记录吗？")) runtime.engine.reset();
   };
 
   const claimOrder = async (orderId: string) => {
@@ -113,10 +108,6 @@ export function MarketGame() {
             <strong>{money.format(balance)} <small>USDT</small></strong>
             {claimable > 0 ? <small>待领取 {money.format(claimable)}</small> : null}
           </div>
-          <button className="reset-button" type="button" onClick={resetGame} aria-label="重置我的虚拟余额和竞猜记录">
-            <RotateCcw aria-hidden="true" />
-            <span>重置</span>
-          </button>
         </div>
       </header>
 

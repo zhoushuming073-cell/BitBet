@@ -89,7 +89,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--ring); outl
   background: rgba(11, 16, 21, 0.94);
 }
 
-.brand, .topbar-actions, .connection, .bot-presence, .reset-button {
+.brand, .topbar-actions, .connection, .bot-presence {
   display: flex;
   align-items: center;
 }
@@ -106,10 +106,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--ring); outl
 .balance > span { color: #7d8994; font-size: 12px; }
 .balance strong { font-size: 15px; font-weight: 650; }
 .balance small { color: #8c97a1; font-size: 12px; font-weight: 500; }
-.reset-button { gap: 7px; height: 38px; padding: 0 13px; border: 1px solid #33404b; border-radius: 9px; background: transparent; color: #aeb7c0; font-size: 13px; cursor: pointer; transition: border-color 160ms ease, color 160ms ease, transform 160ms ease; }
-.reset-button:hover { border-color: #66727c; color: #f3f5f7; }
-.reset-button:active { transform: translateY(1px); }
-.reset-button svg { width: 15px; }
 
 .page-content { width: min(1480px, 100%); margin: 0 auto; padding: 18px 22px 0; }
 .play-grid { display: grid; grid-template-columns: minmax(0, 1.72fr) minmax(350px, 0.78fr); gap: 14px; align-items: stretch; }
@@ -198,7 +194,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--ring); outl
 .board-player strong { font-size: 14px; font-weight: 650; }
 .board-player small, .board-assets small { color: #71808c; font-size: 11px; }
 .board-orders { color: #7f8a94; font-size: 12px; }
-.board-profit { text-align: right; font-family: var(--font-mono); font-size: 14px; font-weight: 650; }
+.board-profit { display: grid; justify-items: end; gap: 2px; text-align: right; font-family: var(--font-mono); }
+.board-profit strong { font-size: 14px; font-weight: 650; }
+.board-profit small { color: #71808c; font-size: 11px; font-weight: 500; }
 .board-assets { display: grid; justify-items: end; gap: 2px; color: #b9c2ca; font-family: var(--font-mono); font-size: 12px; }
 
 .open-orders { margin-top: 14px; overflow: hidden; }
@@ -282,12 +280,11 @@ footer svg { width: 15px; color: #87929c; }
   .brand { font-size: 15px; gap: 8px; }
   .brand-mark { width: 26px; height: 26px; border-radius: 7px; }
   .brand-mark svg { width: 16px; height: 16px; }
-  .connection, .bot-presence span, .balance > span, .reset-button span { display: none; }
+  .connection, .bot-presence span, .balance > span { display: none; }
   .topbar-actions { gap: 10px; }
   .balance { padding-left: 0; border-left: 0; gap: 0; }
   .balance strong { font-size: 14px; }
   .balance small { font-size: 11px; }
-  .reset-button { width: 32px; height: 32px; padding: 0; justify-content: center; }
   .bot-presence { width: 28px; height: 28px; justify-content: center; }
 
   .page-content { width: 100%; padding: 6px 6px 0; }

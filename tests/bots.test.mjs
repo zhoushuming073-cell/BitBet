@@ -70,3 +70,9 @@ test("Bot hook submits through the same engine order API", async () => {
   assert.doesNotMatch(hook, /ledger\.balance\s*=/);
   assert.doesNotMatch(contract, /closePrice|settlementResult|futurePrice/);
 });
+
+test("weekly competition exposes no player reset control", async () => {
+  const fs = await import("node:fs/promises");
+  const page = await fs.readFile(`${root}/components/pulse5/market-game.tsx`, "utf8");
+  assert.doesNotMatch(page, /resetGame|reset-button|重置我的虚拟余额/);
+});

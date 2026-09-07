@@ -3,6 +3,7 @@
 import { Trophy } from "lucide-react";
 import type { Pulse5Engine } from "@/lib/pulse5/engine/Pulse5Engine";
 import { currentWeekStart } from "@/lib/pulse5/bots";
+import { GAME_CONFIG } from "@/lib/pulse5/game/gameConfig";
 import type { TradingBotState } from "./use-trading-bots";
 
 const amount = new Intl.NumberFormat("en-US", {
@@ -17,6 +18,7 @@ interface Standing {
   profit: number;
   orders: number;
   assets: number;
+  roi: number;
   accent: "you" | "orange" | "slate";
 }
 
@@ -28,6 +30,7 @@ function weeklyMetrics(engine: Pulse5Engine, weekStart: number) {
     profit: orders.reduce((sum, order) => sum + order.profit, 0),
     orders: orders.length,
     assets: engine.ledger.balance + engine.ledger.claimableBalance(),
+    roi: orders.reduce((sum, order) => sum + order.profit, 0) / GAME_CONFIG.INITIAL_BALANCE * 100,
   };
 }
 
@@ -69,7 +72,8 @@ export function WeeklyLeaderboard({
             <span className="board-player"><strong>{row.name}</strong><small>{row.label}</small></span>
             <span className="board-orders">{row.orders} 单</span>
             <span className={row.profit >= 0 ? "board-profit up" : "board-profit down"}>
-              {row.profit > 0 ? "+" : ""}{amount.format(row.profit)}
+              <strong>{row.profit > 0 ? "+" : ""}{amount.format(row.profit)}</strong>
+              <small>{row.roi > 0 ? "+" : ""}{row.roi.toFixed(2)}%</small>
             </span>
             <span className="board-assets"><small>总资产</small>{amount.format(row.assets)}</span>
           </div>

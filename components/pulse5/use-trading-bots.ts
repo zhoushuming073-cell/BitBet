@@ -123,13 +123,16 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
                 now,
               );
               bot.actedRounds.add(roundId);
-              bot.lastAction = `${decision.action === "UP" ? "看涨" : "看跌"} ${decision.stake} USDT`;
+              bot.lastAction = `持仓 ${decision.action === "UP" ? "看涨" : "看跌"} ${decision.stake} USDT`;
             } catch {
               // The same execution gate as the player is authoritative.
             }
-          } else if (decision && now >= view.round.start + (view.round.end - view.round.start) * 0.68) {
-            bot.actedRounds.add(roundId);
-            bot.lastAction = "本轮跳过";
+          } else if (decision) {
+            bot.lastAction = decision.reason;
+            if (now >= view.round.start + (view.round.end - view.round.start) * 0.7) {
+              bot.actedRounds.add(roundId);
+              bot.lastAction = "本轮跳过，等待下一轮";
+            }
           }
         }
       }
