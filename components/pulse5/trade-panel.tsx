@@ -139,11 +139,12 @@ export function TradePanel({
   const downDisabled = !view.downQuotable;
 
   return (
-    <aside className="prediction-panel" aria-labelledby="prediction-title">
+    <aside className="prediction-panel" aria-label="下单预测">
+      <h2 className="mobile-trade-title">下单预测</h2>
       <div className="round-meta">
         <div>
           <p>第 {roundLabel} 轮</p>
-          <span id="prediction-title">预测 5 分钟后 BTC 价格方向</span>
+          <span>预测 5 分钟后 BTC 价格方向</span>
         </div>
         <span className={locked ? "round-status locked" : "round-status"}>
           {locked ? <LockKeyhole aria-hidden="true" /> : null}

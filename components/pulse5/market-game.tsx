@@ -12,6 +12,7 @@ import { MarketChart } from "./market-chart";
 import { RoundResultToast } from "./round-result-toast";
 import { useTradingBots } from "./use-trading-bots";
 import { WeeklyLeaderboard } from "./weekly-leaderboard";
+import { MobileCompetitionTabs } from "./mobile-competition-tabs";
 
 const money = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
@@ -79,6 +80,12 @@ export function MarketGame() {
   const difference = currentPrice && openPrice ? currentPrice - openPrice : 0;
   const differencePercent = openPrice ? (difference / openPrice) * 100 : 0;
   const rising = difference >= 0;
+  const roundLabel = new Date(view.round.id).toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const locked = view.phase !== "OPEN";
 
   const balance = view.balance;
   const openOrders = view.openOrders;
@@ -115,21 +122,31 @@ export function MarketGame() {
         <div className="play-grid">
           <section className="market-panel" aria-labelledby="market-title">
             <div className="market-heading">
-              <div>
-                <p id="market-title">BTC / USDT</p>
-                <div className="live-price">
-                  <strong>{currentPrice ? `$${money.format(currentPrice)}` : "等待行情"}</strong>
-                  {currentPrice ? (
-                    <span className={rising ? "up" : "down"}>
-                      {difference >= 0 ? "+" : ""}{money.format(difference)} ({differencePercent >= 0 ? "+" : ""}{differencePercent.toFixed(3)}%)
-                    </span>
-                  ) : null}
+              <div className="market-left">
+                <div className="market-summary">
+                  <p id="market-title">BTC / USDT</p>
+                  <div className="live-price">
+                    <strong>{currentPrice ? `$${money.format(currentPrice)}` : "等待行情"}</strong>
+                    {currentPrice ? (
+                      <span className={rising ? "up" : "down"}>
+                        {difference >= 0 ? "+" : ""}{money.format(difference)} ({differencePercent >= 0 ? "+" : ""}{differencePercent.toFixed(3)}%)
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="market-facts">
+                  <div><span>本轮开盘价</span><strong>{openPrice ? `$${money.format(openPrice)}` : "等待确认"}</strong></div>
+                  <div><span>本轮方向</span><strong className={rising ? "up" : "down"}>{currentPrice ? (rising ? "上涨" : "下跌") : "等待行情"}</strong></div>
                 </div>
               </div>
-              <div className="market-facts">
-                <div><span>本轮开盘价</span><strong>{openPrice ? `$${money.format(openPrice)}` : "等待确认"}</strong></div>
-                <div><span>本轮方向</span><strong className={rising ? "up" : "down"}>{currentPrice ? (rising ? "上涨" : "下跌") : "等待行情"}</strong></div>
-                <div className="heading-countdown"><span>剩余</span><strong>{formatCountdown(view.round.secondsRemaining)}</strong></div>
+              <div className="mobile-round-summary">
+                <div className="mobile-round-head">
+                  <strong>第 {roundLabel} 轮</strong>
+                  <span className={locked ? "locked" : ""}>{locked ? "已停止" : "竞猜中"}</span>
+                </div>
+                <small>预测 5 分钟后 BTC 价格方向</small>
+                <b>{formatCountdown(view.round.secondsRemaining)}</b>
+                <em className={rising ? "up" : "down"}>{currentPrice ? (rising ? "当前上涨" : "当前下跌") : "等待行情"}</em>
               </div>
             </div>
             <MarketChart
@@ -145,15 +162,26 @@ export function MarketGame() {
           <TradePanel engine={runtime.engine} view={view} balance={balance} onSubmit={handleSubmit} />
         </div>
 
-        <WeeklyLeaderboard playerEngine={runtime.engine} bots={bots} />
-
-        <OpenOrders orders={openOrders} />
-        <HistoryTable
-          orders={settledOrders}
+        <MobileCompetitionTabs
+          playerEngine={runtime.engine}
+          playerOrders={openOrders}
+          settledOrders={settledOrders}
           claimable={claimable}
+          bots={bots}
           onClaim={claimOrder}
           onClaimAll={claimAll}
         />
+
+        <div className="desktop-competition">
+          <WeeklyLeaderboard playerEngine={runtime.engine} bots={bots} />
+          <OpenOrders orders={openOrders} />
+          <HistoryTable
+            orders={settledOrders}
+            claimable={claimable}
+            onClaim={claimOrder}
+            onClaimAll={claimAll}
+          />
+        </div>
       </div>
 
       <footer>

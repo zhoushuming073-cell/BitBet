@@ -142,7 +142,9 @@ export function MarketChart({
       // ---- 2. continuous 1-minute sliding window (wall-clock right edge) ----
       const right = Date.now();
       const left = right - VISIBLE_WINDOW_MS;
-      const plotW = Math.max(1, cssW - PAD_L - PAD_R);
+      const compact = cssW < 260;
+      const padRight = compact ? 58 : PAD_R;
+      const plotW = Math.max(1, cssW - PAD_L - padRight);
       const plotH = Math.max(1, cssH - PAD_T - PAD_B);
 
       // ---- 3. resolve visible series + target Y range (single pass) ----
@@ -182,7 +184,7 @@ export function MarketChart({
 
       // horizontal grid + right-side price labels
       const yStep = niceStep(effRange / 5);
-      ctx.font = "11px SFMono-Regular, Consolas, monospace";
+      ctx.font = compact ? "8px SFMono-Regular, Consolas, monospace" : "11px SFMono-Regular, Consolas, monospace";
       ctx.textBaseline = "middle";
       const gridLow = Math.ceil(dispMin / yStep) * yStep;
       ctx.lineWidth = 1;
@@ -198,7 +200,7 @@ export function MarketChart({
         ctx.setLineDash([]);
         ctx.fillStyle = AXIS_TEXT;
         ctx.textAlign = "left";
-        ctx.fillText(money.format(gv), PAD_L + plotW + 8, y);
+        ctx.fillText(compact ? Math.round(gv).toLocaleString("en-US") : money.format(gv), PAD_L + plotW + (compact ? 4 : 8), y);
       }
 
       // vertical time grid every 30s
@@ -218,7 +220,9 @@ export function MarketChart({
         ctx.fillStyle = AXIS_TEXT;
         const d = new Date(tv);
         ctx.fillText(
-          `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`,
+          compact
+            ? `${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`
+            : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`,
           x,
           PAD_T + plotH + 5,
         );
@@ -239,7 +243,11 @@ export function MarketChart({
           ctx.fillStyle = OPEN_COLOR;
           ctx.textAlign = "left";
           ctx.textBaseline = "bottom";
-          ctx.fillText(`开盘 ${money.format(p.roundOpen)}`, PAD_L + 6, yo - 3);
+          ctx.fillText(
+            compact ? `开盘 ${Math.round(p.roundOpen).toLocaleString("en-US")}` : `开盘 ${money.format(p.roundOpen)}`,
+            PAD_L + 6,
+            yo - 3,
+          );
         }
       }
 
@@ -279,7 +287,6 @@ export function MarketChart({
 
       // order markers — only those still inside the rolling window.
       // Mobile keeps it minimal (small dots only); desktop adds a compact label.
-      const compact = cssW < 680;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
       for (let i = 0; i < p.orders.length; i += 1) {
@@ -309,8 +316,8 @@ export function MarketChart({
         ctx.beginPath();
         ctx.arc(lx, ly, 3.2, 0, Math.PI * 2);
         ctx.fill();
-        const label = `$${money.format(livePrice)}`;
-        ctx.font = "600 11px SFMono-Regular, Consolas, monospace";
+        const label = compact ? Math.round(livePrice).toLocaleString("en-US") : `$${money.format(livePrice)}`;
+        ctx.font = compact ? "600 8px SFMono-Regular, Consolas, monospace" : "600 11px SFMono-Regular, Consolas, monospace";
         const tw = ctx.measureText(label).width + 12;
         ctx.fillStyle = lineColor;
         ctx.globalAlpha = 0.18;
@@ -319,7 +326,7 @@ export function MarketChart({
         ctx.fillStyle = lineColor;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(label, PAD_L + plotW + 8, cy);
+        ctx.fillText(label, PAD_L + plotW + (compact ? 4 : 8), cy);
       }
 
       raf = requestAnimationFrame(frame);
@@ -361,6 +368,7 @@ export function MarketChart({
   return (
     <section className="chart-panel" aria-label="BTC 实时价格图表">
       <div className="chart-toolbar">
+        <strong className="chart-title">1 分钟走势</strong>
         <div className={`round-change ${rising ? "up" : "down"}`}>
           {rising ? <ArrowUp /> : <ArrowDown />}
           <span>{delta >= 0 ? "+" : ""}{money.format(delta)} ({roundOpen ? ((delta / roundOpen) * 100).toFixed(3) : "0.000"}%)</span>

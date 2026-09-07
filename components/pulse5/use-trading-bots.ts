@@ -5,6 +5,7 @@ import { createBrowserEngine, type BrowserRuntime } from "@/lib/pulse5/engine/cr
 import type { EngineView } from "@/lib/pulse5/engine/Pulse5Engine";
 import type { Order } from "@/lib/pulse5/engine/types";
 import { BOT_DEFINITIONS, type BotDecisionContext } from "@/lib/pulse5/bots";
+import { BinanceFeedManager } from "@/lib/pulse5/market/BinanceFeedManager";
 
 type BotDefinition = (typeof BOT_DEFINITIONS)[number];
 
@@ -82,6 +83,31 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
       actedRounds: new Set<number>(),
       lastAction: "观察中",
     }));
+    const settlingRounds = new Set<number>();
+
+    const settleBotRound = async (roundId: number) => {
+      if (settlingRounds.has(roundId)) return;
+      settlingRounds.add(roundId);
+      try {
+        const candle = await BinanceFeedManager.fetchClosedCandle(roundId, Date.now());
+        if (!candle?.closed) return;
+        const settledAt = Date.now();
+        for (const bot of runtimes) {
+          if (
+            bot.runtime.engine.ledger.openOrdersForRound(roundId).length > 0
+            && !bot.runtime.engine.ledger.isSettled(roundId)
+          ) {
+            bot.runtime.engine.settle(roundId, candle.open, candle.close, settledAt);
+            bot.runtime.engine.claimAll();
+            bot.lastAction = "上一轮已结算，观察新机会";
+          }
+        }
+      } catch {
+        // Retry on the next update. Settlement only uses an officially closed candle.
+      } finally {
+        settlingRounds.delete(roundId);
+      }
+    };
 
     const update = () => {
       const now = Date.now();
@@ -104,6 +130,9 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
             }
           }
           bot.runtime.engine.tick(now);
+          for (const dueRoundId of bot.runtime.engine.roundsNeedingSettlement(now)) {
+            void settleBotRound(dueRoundId);
+          }
         }
 
         const before = bot.runtime.engine.getView(now);
@@ -125,7 +154,9 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
               bot.actedRounds.add(roundId);
               bot.lastAction = `持仓 ${decision.action === "UP" ? "看涨" : "看跌"} ${decision.stake} USDT`;
             } catch {
-              // The same execution gate as the player is authoritative.
+              // The same execution gate as the player is authoritative. Keep
+              // retrying during the legal window, but make the state visible.
+              bot.lastAction = "信号已出现，等待成交条件";
             }
           } else if (decision) {
             bot.lastAction = decision.reason;

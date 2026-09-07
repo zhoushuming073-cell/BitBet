@@ -76,3 +76,21 @@ test("weekly competition exposes no player reset control", async () => {
   const page = await fs.readFile(`${root}/components/pulse5/market-game.tsx`, "utf8");
   assert.doesNotMatch(page, /resetGame|reset-button|重置我的虚拟余额/);
 });
+
+test("bot-only rounds use an official closed candle for settlement", async () => {
+  const fs = await import("node:fs/promises");
+  const hook = await fs.readFile(`${root}/components/pulse5/use-trading-bots.ts`, "utf8");
+  assert.match(hook, /fetchClosedCandle\(roundId, Date\.now\(\)\)/);
+  assert.match(hook, /engine\.settle\(roundId, candle\.open, candle\.close, settledAt\)/);
+  assert.match(hook, /roundsNeedingSettlement\(now\)/);
+});
+
+test("mobile competition combines player and bot open orders in tabs", async () => {
+  const fs = await import("node:fs/promises");
+  const tabs = await fs.readFile(`${root}/components/pulse5/mobile-competition-tabs.tsx`, "utf8");
+  assert.match(tabs, /playerOrders\.map/);
+  assert.match(tabs, /bot\.view\.openOrders/);
+  assert.match(tabs, /实时交易单/);
+  assert.match(tabs, /最近结果/);
+  assert.match(tabs, /本周排行/);
+});

@@ -23,14 +23,15 @@ interface Standing {
 }
 
 function weeklyMetrics(engine: Pulse5Engine, weekStart: number) {
-  const orders = engine.ledger.orders.filter((order) => (
-    order.createdAt >= weekStart && order.status !== "OPEN"
-  ));
+  const orders = engine.ledger.orders.filter((order) => order.createdAt >= weekStart);
+  const settledOrders = orders.filter((order) => order.status !== "OPEN");
+  const openStake = orders.reduce((sum, order) => sum + (order.status === "OPEN" ? order.stake : 0), 0);
+  const profit = settledOrders.reduce((sum, order) => sum + order.profit, 0);
   return {
-    profit: orders.reduce((sum, order) => sum + order.profit, 0),
+    profit,
     orders: orders.length,
-    assets: engine.ledger.balance + engine.ledger.claimableBalance(),
-    roi: orders.reduce((sum, order) => sum + order.profit, 0) / GAME_CONFIG.INITIAL_BALANCE * 100,
+    assets: engine.ledger.balance + engine.ledger.claimableBalance() + openStake,
+    roi: profit / GAME_CONFIG.INITIAL_BALANCE * 100,
   };
 }
 
