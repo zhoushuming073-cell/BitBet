@@ -16,7 +16,7 @@ import type {
 export type LeaderboardSortKey = "netProfit" | "roi" | "winRate" | "currentBalance";
 
 export interface UserRepository {
-  createUser(input: { authUid: string; username: string; now: number }): Promise<User>;
+  createUser(input: { authUid: string; email?: string; username: string; now: number }): Promise<User>;
   getUserByAuthUid(authUid: string): Promise<User | null>;
   getUserByUsername(username: string): Promise<User | null>;
   touchLogin(userId: string, at: number): Promise<void>;
@@ -68,7 +68,7 @@ export interface ClaimResult {
 
 export interface LeaderboardRepository {
   upsertStats(stats: LeaderboardStats): Promise<void>;
-  listTop(sortBy: LeaderboardSortKey, limit: number): Promise<LeaderboardStats[]>;
+  listTop(sortBy: LeaderboardSortKey, limit: number, minOrders?: number): Promise<LeaderboardStats[]>;
   getStats(userId: string): Promise<LeaderboardStats | null>;
   getRank(userId: string, sortBy: LeaderboardSortKey): Promise<number>;
 }
@@ -88,4 +88,14 @@ export interface Repositories {
    * { alreadyClaimed: true } and never touches the wallet twice.
    */
   claim(userId: string, settlementId: string, now: number): Promise<ClaimResult>;
+  /** Debit wallet + insert the idempotent order + ledger row in one transaction. */
+  placeOrder(userId: string, order: OrderRecord, now: number): Promise<{ wallet: Wallet; alreadyExisted: boolean }>;
+  /** Claim every currently pending settlement in one transaction. */
+  claimAll(userId: string, now: number): Promise<{ amount: number; count: number }>;
+  /** Compare the wallet cache with the sum of pending settlement facts. */
+  pendingClaimConsistency(userId: string): Promise<{ cached: number; expected: number; consistent: boolean }>;
+  /** Rebuild wallets.pending_claim from settlement facts. */
+  rebuildPendingClaim(userId: string, now: number): Promise<Wallet>;
+  /** Insert a settlement fact and update the pending cache in one transaction. */
+  recordSettlement(settlement: SettlementRecord, now: number): Promise<{ created: boolean; wallet: Wallet }>;
 }

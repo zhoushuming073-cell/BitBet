@@ -10,8 +10,8 @@
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/*.test.mjs",
-    "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test": "npm run build && node --test --test-concurrency=1 tests/*.test.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
   },
   "dependencies": {
@@ -27,6 +27,7 @@
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^1.31.0",
+    "mysql2": "^3.24.3",
     "next": "16.2.6",
     "next-themes": "^0.4.6",
     "radix-ui": "^1.6.7",

@@ -1,9 +1,9 @@
 /**
  * BitBet domain types — the single source of truth for persisted entities.
  *
- * These are decoupled from any storage backend (CloudBase NoSQL, memory mock,
- * or a future durable store). Timestamps are epoch milliseconds. Balances use
- * the existing USDT virtual-currency convention (2-decimal floats via money()).
+ * These are decoupled from the storage backend. Timestamps are epoch
+ * milliseconds. Runtime values are numbers for engine compatibility; MySQL
+ * persists all money as DECIMAL and adapters convert only at the boundary.
  */
 
 export type Side = "up" | "down";
@@ -16,6 +16,7 @@ export type RoundStatus = "OPEN" | "SETTLED";
 export interface User {
   _id: string; // = authUid
   authUid: string;
+  email?: string;
   username: string;
   status: "active" | "disabled";
   createdAt: number;
@@ -87,6 +88,8 @@ export interface OrderRecord {
   orderId: string;
   userId: string;
   roundId: string;
+  /** Unique per user. Required by the authoritative persistence write path. */
+  idempotencyKey: string;
   side: Side;
   stake: number;
   lockedOdds: number;
@@ -142,7 +145,11 @@ export interface SyncBatch {
   status: SyncBatchStatus;
   attemptCount: number;
   lastError?: string;
+  nextAttemptAt?: number | null;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: number | null;
   createdAt: number;
+  updatedAt?: number;
   syncedAt: number | null;
 }
 

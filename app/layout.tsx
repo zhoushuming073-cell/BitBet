@@ -7,8 +7,8 @@ import "./globals.css";
 const previewMode = process.env.GITHUB_ACTIONS ? "production" : "development";
 
 export const metadata: Metadata = {
-  title: "BTC 5分钟涨跌竞猜",
-  description: "根据实时 BTC 行情预测 5 分钟后的价格方向。使用虚拟资金体验，不涉及真实交易。",
+  title: "BTC 5分钟涨跌 · 三人周赛",
+  description: "和 Bot Alpha、Bot Beta 使用同一实时 BTC 行情与结算规则进行每周虚拟涨跌比赛。",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

@@ -6,11 +6,11 @@ import { Pulse5Engine } from "./Pulse5Engine";
 import type { LedgerPersister } from "../orders/LedgerStore";
 import type { LedgerSnapshot } from "./types";
 
-function localStoragePersister(): LedgerPersister {
+function localStoragePersister(storageKey: string): LedgerPersister {
   return {
     load() {
       try {
-        const raw = localStorage.getItem(GAME_CONFIG.STORAGE_KEY);
+        const raw = localStorage.getItem(storageKey);
         return raw ? (JSON.parse(raw) as LedgerSnapshot) : null;
       } catch {
         return null;
@@ -18,7 +18,7 @@ function localStoragePersister(): LedgerPersister {
     },
     save(snapshot) {
       try {
-        localStorage.setItem(GAME_CONFIG.STORAGE_KEY, JSON.stringify(snapshot));
+        localStorage.setItem(storageKey, JSON.stringify(snapshot));
       } catch {
         /* storage full / disabled — ledger still holds in memory */
       }
@@ -31,14 +31,25 @@ export interface BrowserRuntime {
   stop: () => void;
 }
 
+export interface BrowserEngineOptions {
+  storageKey?: string;
+  /** Create only the ledger/engine; another trusted runtime mirrors market data. */
+  passive?: boolean;
+}
+
 /**
  * Wires the authoritative engine to the live Binance feed, the clock,
  * round-open discovery, chart/volatility sampling and restart catch-up
  * settlement. Everything virtual; no order is ever sent to Binance.
  */
-export function createBrowserEngine(): BrowserRuntime {
-  const persister = typeof localStorage !== "undefined" ? localStoragePersister() : null;
+export function createBrowserEngine(options: BrowserEngineOptions = {}): BrowserRuntime {
+  const storageKey = options.storageKey ?? GAME_CONFIG.STORAGE_KEY;
+  const persister = typeof localStorage !== "undefined" ? localStoragePersister(storageKey) : null;
   const engine = new Pulse5Engine(persister);
+
+  if (options.passive) {
+    return { engine, stop() {} };
+  }
 
   let lastRoundId = -1;
   let lastChartTs = 0;

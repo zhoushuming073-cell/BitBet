@@ -10,5 +10,8 @@ import type { GameStateStore } from "../orders/GameStateStore";
 import { Pulse5Engine } from "./Pulse5Engine";
 
 export function createServerEngine(store?: GameStateStore): Pulse5Engine {
+  if (!store && process.env.NODE_ENV === "production") {
+    throw new Error("生产环境必须注入 DurableGameStateStore；内存权威状态已禁用");
+  }
   return new Pulse5Engine(store ?? new LedgerStore(null));
 }

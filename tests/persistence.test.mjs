@@ -171,3 +171,109 @@ test("权威引擎下单幂等：同一 idempotencyKey 只建一单", async () =
   assert.equal(engine.ledger.balance, before, "不重复扣款");
   assert.equal(engine.ledger.orders.length, 1);
 });
+
+test("并发领取：二十个请求最多一个入账", async () => {
+  const acc = await accountService.registerUser("claimrace");
+  const now = Date.now();
+  await repos.recordSettlement({
+    _id: "st-race",
+    settlementId: "st-race",
+    userId: acc.userId,
+    roundId: "r-race",
+    orderId: "o-race",
+    result: "UP",
+    stake: 100,
+    lockedOdds: 1.9,
+    payout: 190,
+    profit: 90,
+    claimStatus: "pending",
+    settledAt: now,
+    claimedAt: null,
+    createdAt: now,
+  }, now);
+  const results = await Promise.all(
+    Array.from({ length: 20 }, () => repos.claim(acc.userId, "st-race", Date.now())),
+  );
+  assert.equal(results.filter((result) => !result.alreadyClaimed).length, 1);
+  assert.equal(results.reduce((sum, result) => sum + result.amount, 0), 190);
+  const wallet = await repos.wallets.getWallet(acc.userId);
+  assert.equal(wallet.availableBalance, 10190);
+  assert.equal(wallet.pendingClaim, 0);
+});
+
+test("并发下单：同一用户幂等键只扣一次并只建一单", async () => {
+  const acc = await accountService.registerUser("orderrace");
+  const now = Date.now();
+  const order = {
+    _id: "order-race",
+    orderId: "order-race",
+    userId: acc.userId,
+    roundId: "round-race",
+    idempotencyKey: "same-persistent-key",
+    side: "up",
+    stake: 250,
+    lockedOdds: 1.9,
+    potentialPayout: 475,
+    entryPrice: 67000,
+    placedAt: now,
+    status: "OPEN",
+    payout: 0,
+    profit: 0,
+    createdAt: now,
+  };
+  const results = await Promise.all([
+    repos.placeOrder(acc.userId, order, now),
+    repos.placeOrder(acc.userId, { ...order, orderId: "order-race-duplicate", _id: "order-race-duplicate" }, now + 1),
+  ]);
+  assert.equal(results.filter((result) => !result.alreadyExisted).length, 1);
+  const wallet = await repos.wallets.getWallet(acc.userId);
+  assert.equal(wallet.availableBalance, 9750);
+  assert.equal((await repos.orders.listByUser(acc.userId)).length, 1);
+});
+
+test("pending_claim 可检测漂移并从 settlement 事实重建", async () => {
+  const acc = await accountService.registerUser("repaircache");
+  await repos.wallets.addPendingClaim(acc.userId, 123.45, Date.now());
+  const before = await repos.pendingClaimConsistency(acc.userId);
+  assert.equal(before.consistent, false);
+  assert.equal(before.expected, 0);
+  await repos.rebuildPendingClaim(acc.userId, Date.now());
+  const after = await repos.pendingClaimConsistency(acc.userId);
+  assert.deepEqual(after, { cached: 0, expected: 0, consistent: true });
+});
+
+test("胜率榜先在仓储层过滤 20 单门槛再排名", async () => {
+  await repos.leaderboard.upsertStats({
+    _id: "one-hit",
+    userId: "one-hit",
+    totalOrders: 1,
+    totalRounds: 1,
+    totalStaked: 10,
+    totalPayout: 20,
+    netProfit: 10,
+    roi: 0.1,
+    wins: 1,
+    losses: 0,
+    winRate: 100,
+    currentBalance: 10010,
+    updatedAt: Date.now(),
+  });
+  await repos.leaderboard.upsertStats({
+    _id: "qualified",
+    userId: "qualified",
+    totalOrders: 20,
+    totalRounds: 20,
+    totalStaked: 200,
+    totalPayout: 300,
+    netProfit: 100,
+    roi: 1,
+    wins: 15,
+    losses: 5,
+    winRate: 75,
+    currentBalance: 10100,
+    updatedAt: Date.now(),
+  });
+  const rows = await repos.leaderboard.listTop("winRate", 50, 20);
+  assert.equal(rows.some((row) => row.userId === "one-hit"), false);
+  assert.equal(rows.some((row) => row.userId === "qualified"), true);
+});

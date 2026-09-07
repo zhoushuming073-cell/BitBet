@@ -34,3 +34,9 @@ export interface GameStateStore {
   snapshot(): LedgerSnapshot;
   persist(): void;
 }
+
+/** Factory boundary for SQLite/Redis/other durable server implementations. */
+export interface GameStateStoreFactory {
+  readonly durable: boolean;
+  forUser(userId: string): GameStateStore;
+}

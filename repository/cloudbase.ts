@@ -52,8 +52,8 @@ function first<T>(res: { data?: Record<string, unknown>[] } | undefined): T | nu
 }
 
 const users: UserRepository = {
-  async createUser({ authUid, username, now }) {
-    const user: User = { _id: authUid, authUid, username, status: "active", createdAt: now, lastLoginAt: now };
+  async createUser({ authUid, email, username, now }) {
+    const user: User = { _id: authUid, authUid, email, username, status: "active", createdAt: now, lastLoginAt: now };
     await upsert(COLLECTIONS.users, authUid, user);
     return user;
   },
@@ -242,9 +242,10 @@ const leaderboard: LeaderboardRepository = {
   async upsertStats(stats) {
     await upsert(COLLECTIONS.leaderboardStats, stats.userId, stats);
   },
-  async listTop(sortBy, limit) {
+  async listTop(sortBy, limit, minOrders = 0) {
     const c = await coll(COLLECTIONS.leaderboardStats);
-    const res = await c.orderBy(sortBy, "desc").limit(limit).get();
+    const query = minOrders > 0 ? c.where({ totalOrders: (await db()).command.gt(minOrders - 1) }) : c;
+    const res = await query.orderBy(sortBy, "desc").limit(limit).get();
     return (res?.data ?? []) as unknown as LeaderboardStats[];
   },
   async getStats(userId) {
@@ -263,6 +264,134 @@ const leaderboard: LeaderboardRepository = {
   },
 };
 
+async function placeOrderAtomic(userId: string, order: OrderRecord, now: number) {
+  const d = await db();
+  return d.runTransaction(async (tx) => {
+    const oc = tx.collection(COLLECTIONS.orders);
+    const wc = tx.collection(COLLECTIONS.wallets);
+    const lc = tx.collection(COLLECTIONS.walletLedger);
+    const existing = await oc.where({ userId, idempotencyKey: order.idempotencyKey }).limit(1).get();
+    const w = first<Wallet>(await wc.doc(userId).get());
+    if (!w) throw new Error("wallet not found");
+    if (existing.data?.length) return { wallet: w, alreadyExisted: true };
+    if (w.availableBalance + 1e-9 < order.stake) throw new Error("insufficient balance");
+    const wallet: Wallet = {
+      ...w,
+      availableBalance: money(w.availableBalance - order.stake),
+      totalStaked: money(w.totalStaked + order.stake),
+      updatedAt: now,
+      version: w.version + 1,
+    };
+    await wc.doc(userId).set(wallet as unknown as Record<string, unknown>);
+    await oc.doc(order.orderId).set(order as unknown as Record<string, unknown>);
+    const ledgerId = `bet-${order.orderId}`;
+    await lc.doc(ledgerId).set({
+      _id: ledgerId,
+      ledgerId,
+      userId,
+      type: "BET",
+      amount: -order.stake,
+      balanceAfter: wallet.availableBalance,
+      roundId: order.roundId,
+      orderId: order.orderId,
+      createdAt: now,
+    });
+    return { wallet, alreadyExisted: false };
+  });
+}
+
+async function claimAllAtomic(userId: string, now: number) {
+  const d = await db();
+  return d.runTransaction(async (tx) => {
+    const sc = tx.collection(COLLECTIONS.settlements);
+    const wc = tx.collection(COLLECTIONS.wallets);
+    const lc = tx.collection(COLLECTIONS.walletLedger);
+    const pending = (await sc.where({ userId, claimStatus: "pending" }).limit(100).get()).data as SettlementRecord[] | undefined;
+    const rows = pending ?? [];
+    const w = first<Wallet>(await wc.doc(userId).get());
+    if (!w) throw new Error("wallet not found");
+    const amount = money(rows.reduce((sum, row) => sum + row.payout, 0));
+    if (!rows.length) return { amount: 0, count: 0 };
+    for (const row of rows) {
+      await sc.doc(row.settlementId).update({ claimStatus: "claimed", claimedAt: now });
+      const ledgerId = `claim-${row.settlementId}`;
+      await lc.doc(ledgerId).set({
+        _id: ledgerId,
+        ledgerId,
+        userId,
+        type: "CLAIM",
+        amount: row.payout,
+        balanceAfter: money(w.availableBalance + amount),
+        settlementId: row.settlementId,
+        createdAt: now,
+      });
+    }
+    await wc.doc(userId).update({
+      availableBalance: money(w.availableBalance + amount),
+      pendingClaim: 0,
+      totalClaimed: money(w.totalClaimed + amount),
+      updatedAt: now,
+      version: w.version + 1,
+    });
+    return { amount, count: rows.length };
+  });
+}
+
+async function pendingClaimConsistency(userId: string) {
+  const w = await wallets.getWallet(userId);
+  if (!w) throw new Error("wallet not found");
+  const pending = await settlements.listPending(userId);
+  const expected = money(pending.reduce((sum, row) => sum + row.payout, 0));
+  return { cached: w.pendingClaim, expected, consistent: w.pendingClaim === expected };
+}
+
+async function rebuildPendingClaim(userId: string, now: number): Promise<Wallet> {
+  const check = await pendingClaimConsistency(userId);
+  const w = await wallets.getWallet(userId);
+  if (!w) throw new Error("wallet not found");
+  const updated = { ...w, pendingClaim: check.expected, updatedAt: now, version: w.version + 1 };
+  await upsert(COLLECTIONS.wallets, userId, updated);
+  return updated;
+}
+
+async function recordSettlementAtomic(settlement: SettlementRecord, now: number) {
+  const d = await db();
+  return d.runTransaction(async (tx) => {
+    const sc = tx.collection(COLLECTIONS.settlements);
+    const wc = tx.collection(COLLECTIONS.wallets);
+    const existing = await sc.doc(settlement.settlementId).get();
+    const wallet = first<Wallet>(await wc.doc(settlement.userId).get());
+    if (!wallet) throw new Error("wallet not found");
+    if (existing.data?.length) return { created: false, wallet };
+    await sc.doc(settlement.settlementId).set({ ...settlement, _id: settlement.settlementId });
+    if (settlement.claimStatus !== "pending" || settlement.payout <= 0) {
+      return { created: true, wallet };
+    }
+    const updated = {
+      ...wallet,
+      pendingClaim: money(wallet.pendingClaim + settlement.payout),
+      updatedAt: now,
+      version: wallet.version + 1,
+    };
+    await wc.doc(settlement.userId).set(updated as unknown as Record<string, unknown>);
+    return { created: true, wallet: updated };
+  });
+}
+
 export function createCloudBaseRepositories(): Repositories {
-  return { users, profiles, wallets, orders, rounds, settlements, leaderboard, claim: claimAtomic };
+  return {
+    users,
+    profiles,
+    wallets,
+    orders,
+    rounds,
+    settlements,
+    leaderboard,
+    claim: claimAtomic,
+    placeOrder: placeOrderAtomic,
+    claimAll: claimAllAtomic,
+    pendingClaimConsistency,
+    rebuildPendingClaim,
+    recordSettlement: recordSettlementAtomic,
+  };
 }

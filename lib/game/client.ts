@@ -4,6 +4,7 @@
  * are authoritative on the server, not in the browser.
  */
 import type { Order, Side } from "@/lib/pulse5/engine/types";
+import { authenticatedFetch } from "@/lib/api/authenticated-fetch";
 
 export interface AuthorityState {
   balance: number;
@@ -12,17 +13,8 @@ export interface AuthorityState {
   settledOrders: Order[];
 }
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init);
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error ?? "请求失败");
-  }
-  return res.json() as Promise<T>;
-}
-
 export function fetchState(): Promise<AuthorityState> {
-  return api<AuthorityState>("/api/game/state");
+  return authenticatedFetch<AuthorityState>("/api/game/state");
 }
 
 export function placeOrder(
@@ -31,15 +23,20 @@ export function placeOrder(
   midPrice: number,
   idempotencyKey: string,
 ): Promise<{ order: Order }> {
-  return api<{ order: Order }>("/api/game/orders", {
+  return authenticatedFetch<{ order: Order }>("/api/game/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ side, stake, midPrice, idempotencyKey }),
+    body: JSON.stringify({
+      side,
+      stake,
+      idempotencyKey,
+      ...(process.env.NODE_ENV !== "production" ? { midPrice } : {}),
+    }),
   });
 }
 
 export function claim(orderId: string): Promise<{ claimed: number }> {
-  return api<{ claimed: number }>("/api/game/claim", {
+  return authenticatedFetch<{ claimed: number }>("/api/game/claim", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ orderId }),
@@ -47,11 +44,14 @@ export function claim(orderId: string): Promise<{ claimed: number }> {
 }
 
 export function claimAll(): Promise<{ claimed: number }> {
-  return api<{ claimed: number }>("/api/game/claim-all", { method: "POST" });
+  return authenticatedFetch<{ claimed: number }>("/api/game/claim-all", { method: "POST" });
 }
 
 export function settle(roundId: number, openPrice: number, closePrice: number): Promise<unknown> {
-  return api("/api/game/settle", {
+  if (process.env.NODE_ENV === "production") {
+    return Promise.reject(new Error("生产结算由可信服务端行情任务执行"));
+  }
+  return authenticatedFetch("/api/game/settle", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ roundId, openPrice, closePrice }),

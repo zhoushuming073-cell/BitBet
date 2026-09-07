@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "@/components/account/use-account";
-import { getLeaderboard, getMyRank, getWinRateMinOrders, type LeaderboardEntry, type MyRank } from "@/services/leaderboard-service";
+import type { LeaderboardEntry, MyRank } from "@/services/leaderboard-service";
 import type { LeaderboardSortKey } from "@/repository";
+import { authenticatedFetch } from "@/lib/api/authenticated-fetch";
 
 const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -24,10 +25,21 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     let alive = true;
-    const minOrders = sortBy === "winRate" ? getWinRateMinOrders() : 0;
     Promise.all([
-      getLeaderboard(sortBy, 50, minOrders),
-      account ? getMyRank(account.userId, sortBy) : Promise.resolve(null),
+      fetch(`/api/leaderboard?sort=${sortBy}`).then(async (response) => {
+        if (!response.ok) throw new Error("排行榜加载失败");
+        return (await response.json() as { rows: LeaderboardEntry[] }).rows;
+      }),
+      account
+        ? authenticatedFetch<{ profile: { username: string } | null; stats: { netProfit: number; roi: number; totalOrders: number } | null; rank: number }>(`/api/account/profile?sort=${sortBy}`)
+            .then((data): MyRank | null => data.profile && data.stats ? ({
+              rank: data.rank,
+              username: data.profile.username,
+              netProfit: data.stats.netProfit,
+              roi: data.stats.roi,
+              totalOrders: data.stats.totalOrders,
+            }) : null)
+        : Promise.resolve(null),
     ]).then(([r, m]) => {
       if (!alive) return;
       setRows(r);

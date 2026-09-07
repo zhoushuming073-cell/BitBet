@@ -29,14 +29,15 @@ export async function claimSettlement(userId: string, settlementId: string): Pro
 
 /** Claim every pending settlement for a user. Returns the total credited. */
 export async function claimAll(userId: string): Promise<number> {
-  const repos = getRepositories();
-  const pending = await repos.settlements.listPending(userId);
-  let total = 0;
-  for (const s of pending) {
-    const { alreadyClaimed, amount } = await repos.claim(userId, s.settlementId, Date.now());
-    if (!alreadyClaimed) total += amount;
-  }
-  return total;
+  return (await getRepositories().claimAll(userId, Date.now())).amount;
+}
+
+export async function checkPendingClaim(userId: string) {
+  return getRepositories().pendingClaimConsistency(userId);
+}
+
+export async function rebuildPendingClaim(userId: string): Promise<Wallet> {
+  return getRepositories().rebuildPendingClaim(userId, Date.now());
 }
 
 /** Move a settled payout into pendingClaim (funds not yet spendable). */

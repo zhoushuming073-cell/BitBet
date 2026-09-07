@@ -3,32 +3,36 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "@/components/account/use-account";
-import { getOrderHistory, getWalletSummary, type WalletSummary } from "@/services/history-service";
-import { getMyRank } from "@/services/leaderboard-service";
-import { claimAll } from "@/services/wallet-service";
 import { logout } from "@/services/account-service";
-import type { OrderRecord } from "@/lib/domain/types";
+import type { LeaderboardStats, OrderRecord, Profile, Wallet } from "@/lib/domain/types";
+import { authenticatedFetch } from "@/lib/api/authenticated-fetch";
 
 const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function ProfilePage() {
   const { account, loading, refresh } = useAccount();
-  const [wallet, setWallet] = useState<WalletSummary | null>(null);
+  const [wallet, setWallet] = useState<Wallet | null>(null);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
-  const [rank, setRank] = useState<{ rank: number; roi: number; netProfit: number } | null>(null);
+  const [stats, setStats] = useState<LeaderboardStats | null>(null);
+  const [rank, setRank] = useState<number>(-1);
+
+  const loadProfile = async () => authenticatedFetch<{
+    profile: Profile | null;
+    wallet: Wallet | null;
+    orders: OrderRecord[];
+    stats: LeaderboardStats | null;
+    rank: number;
+  }>("/api/account/profile");
 
   useEffect(() => {
     if (!account) return;
     let alive = true;
-    Promise.all([
-      getWalletSummary(account.userId),
-      getOrderHistory(account.userId, 20),
-      getMyRank(account.userId, "netProfit"),
-    ]).then(([w, o, r]) => {
+    loadProfile().then((data) => {
       if (!alive) return;
-      setWallet(w);
-      setOrders(o);
-      setRank(r);
+      setWallet(data.wallet);
+      setOrders(data.orders);
+      setStats(data.stats);
+      setRank(data.rank);
     });
     return () => {
       alive = false;
@@ -37,19 +41,16 @@ export default function ProfilePage() {
 
   const reload = async () => {
     if (!account) return;
-    const [w, o, r] = await Promise.all([
-      getWalletSummary(account.userId),
-      getOrderHistory(account.userId, 20),
-      getMyRank(account.userId, "netProfit"),
-    ]);
-    setWallet(w);
-    setOrders(o);
-    setRank(r);
+    const data = await loadProfile();
+    setWallet(data.wallet);
+    setOrders(data.orders);
+    setStats(data.stats);
+    setRank(data.rank);
   };
 
   const onClaimAll = async () => {
     if (!account) return;
-    await claimAll(account.userId);
+    await authenticatedFetch("/api/game/claim-all", { method: "POST" });
     await Promise.all([reload(), refresh()]);
   };
 
@@ -81,7 +82,7 @@ export default function ProfilePage() {
         <div className="profile-head">
           <div>
             <h1 className="auth-title" style={{ marginBottom: 0 }}>{account.username}</h1>
-            <p className="auth-sub" style={{ marginBottom: 0 }}>排名 #{rank?.rank ?? "—"}</p>
+            <p className="auth-sub" style={{ marginBottom: 0 }}>排名 {rank > 0 ? `#${rank}` : "—"}</p>
           </div>
           <button className="auth-link-btn" type="button" onClick={onLogout}>退出登录</button>
         </div>
@@ -93,8 +94,8 @@ export default function ProfilePage() {
           <div className="stat"><span>待领取</span><strong className="up">{money.format(wallet?.pendingClaim ?? 0)} USDT</strong></div>
         </div>
         <div className="stat-row">
-          <div className="stat"><span>累计收益</span><strong className={rank && rank.netProfit >= 0 ? "up" : "down"}>{rank && rank.netProfit > 0 ? "+" : ""}{money.format(rank?.netProfit ?? 0)}</strong></div>
-          <div className="stat"><span>ROI</span><strong>{rank ? `${money.format(rank.roi)}%` : "—"}</strong></div>
+          <div className="stat"><span>累计收益</span><strong className={stats && stats.netProfit >= 0 ? "up" : "down"}>{stats && stats.netProfit > 0 ? "+" : ""}{money.format(stats?.netProfit ?? 0)}</strong></div>
+          <div className="stat"><span>ROI</span><strong>{stats ? `${money.format(stats.roi)}%` : "—"}</strong></div>
         </div>
         {(wallet?.pendingClaim ?? 0) > 0 ? (
           <button className="auth-button" type="button" onClick={onClaimAll} style={{ marginTop: 16 }}>

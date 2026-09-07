@@ -10,7 +10,7 @@
 import type { Order as EngineOrder, RoundRecord as EngineRound } from "@/lib/pulse5/engine/types";
 import type { OrderRecord, RoundRecord, SettlementRecord } from "@/lib/domain/types";
 import { getRepositories } from "@/repository";
-import { claimSettlement, debitBet } from "./wallet-service";
+import { claimSettlement } from "./wallet-service";
 import { refreshStats } from "./leaderboard-service";
 
 export function toRoundId(engineRoundId: number): string {
@@ -29,6 +29,7 @@ function toOrderRecord(order: EngineOrder, userId: string): OrderRecord {
     orderId: order.id,
     userId,
     roundId: toRoundId(order.roundId),
+    idempotencyKey: order.idempotencyKey || order.id,
     side: order.side,
     stake: order.stake,
     lockedOdds: order.lockedOdds,
@@ -64,8 +65,7 @@ const syncedRounds = new Set<string>();
 /** Called right after an engine bet is placed (registered users only). */
 export async function syncBet(userId: string, order: EngineOrder): Promise<void> {
   const repos = getRepositories();
-  await debitBet(userId, { orderId: order.id, roundId: toRoundId(order.roundId), stake: order.stake });
-  await repos.orders.createOrder(toOrderRecord(order, userId));
+  await repos.placeOrder(userId, toOrderRecord(order, userId), Date.now());
 }
 
 /** Called once after a round settles (registered users only). */
@@ -81,7 +81,6 @@ export async function syncSettlement(
   const repos = getRepositories();
   await repos.rounds.createRound(toRoundRecord(round));
 
-  let pendingTotal = 0;
   for (const o of orders) {
     await repos.orders.createOrder(toOrderRecord(o, userId));
     if (o.status !== "WON" && o.status !== "VOID") continue;
@@ -101,12 +100,7 @@ export async function syncSettlement(
       claimedAt: o.claimed ? o.settledAt ?? Date.now() : null,
       createdAt: o.createdAt,
     };
-    await repos.settlements.createSettlement(settlement);
-    if (!o.claimed) pendingTotal += o.payout;
-  }
-
-  if (pendingTotal > 0) {
-    await repos.wallets.addPendingClaim(userId, pendingTotal, Date.now());
+    await repos.recordSettlement(settlement, Date.now());
   }
   await refreshStats(userId);
 }

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, CircleCheck, LockKeyhole, TriangleAlert } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { GAME_CONFIG } from "@/lib/pulse5/game/gameConfig";
+import { quickAmountsFor } from "@/lib/pulse5/game/quickAmounts";
 import type { Pulse5Engine, EngineView } from "@/lib/pulse5/engine/Pulse5Engine";
 import type { Side } from "@/lib/pulse5/engine/types";
 
@@ -42,16 +43,6 @@ function formatCountdown(seconds: number) {
 
 function roundAmount(value: number) {
   return Math.floor(value * 100) / 100;
-}
-
-/**
- * Quick-amount rounding: snap to the nearest 10 so the ones digit reads "0"
- * (and tiny values just drop the decimal tail). Keeps the quick buttons tidy.
- */
-function roundToTens(value: number) {
-  if (!(value > 0)) return 0;
-  if (value < 10) return Math.round(value);
-  return Math.round(value / 10) * 10;
 }
 
 export function TradePanel({
@@ -103,10 +94,7 @@ export function TradePanel({
   // Current balance plus this round's committed amount reconstructs the balance
   // at the start of the round, so quick amounts stay stable after a prediction.
   const roundStartingBalance = balance + view.position.totalInvested;
-  const quickAmounts = [0.1, 0.25, 0.5].map((ratio) => ({
-    ratio,
-    value: roundToTens(roundStartingBalance * ratio),
-  }));
+  const quickAmounts = quickAmountsFor(roundStartingBalance);
 
   const chooseSide = (nextSide: Side) => {
     setSide(nextSide);
@@ -187,8 +175,8 @@ export function TradePanel({
       </div>
 
       <div className="amount-grid" aria-label="快捷金额">
-        {quickAmounts.map(({ ratio, value }) => (
-          <button key={ratio} type="button" onClick={() => setQuickAmount(value)}>
+        {quickAmounts.map((value) => (
+          <button key={value} type="button" onClick={() => setQuickAmount(value)}>
             {quickMoney.format(value)}
           </button>
         ))}

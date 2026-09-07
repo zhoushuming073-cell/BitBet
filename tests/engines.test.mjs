@@ -13,23 +13,26 @@ const vite = await createServer({
 });
 
 const mod = (p) => vite.ssrLoadModule(p);
-let CFG, RoundEngine, FairProb, Volatility, Inventory, PriceImpact, MarketMaker,
-  QuoteService, LedgerStore, Position, Settlement, Pulse5Engine, ErrorCode;
+let CFG, RoundEngine, FairProb, Volatility, PriceImpact, MarketMaker,
+  LedgerStore, Position, Settlement, Pulse5Engine, ErrorCode, quickAmountsFor;
 
 before(async () => {
   CFG = (await mod("/lib/pulse5/game/gameConfig.ts")).GAME_CONFIG;
   RoundEngine = await mod("/lib/pulse5/game/RoundEngine.ts");
   FairProb = await mod("/lib/pulse5/market/FairProbabilityEngine.ts");
   Volatility = await mod("/lib/pulse5/market/VolatilityEstimator.ts");
-  Inventory = await mod("/lib/pulse5/market/InventoryModel.ts");
   PriceImpact = await mod("/lib/pulse5/market/PriceImpactModel.ts");
   MarketMaker = await mod("/lib/pulse5/market/MarketMaker.ts");
-  QuoteService = await mod("/lib/pulse5/market/QuoteService.ts");
   LedgerStore = await mod("/lib/pulse5/orders/LedgerStore.ts");
   Position = await mod("/lib/pulse5/orders/PositionService.ts");
   Settlement = await mod("/lib/pulse5/settlement/SettlementService.ts");
+  quickAmountsFor = (await mod("/lib/pulse5/game/quickAmounts.ts")).quickAmountsFor;
   Pulse5Engine = (await mod("/lib/pulse5/engine/Pulse5Engine.ts")).Pulse5Engine;
   ErrorCode = (await mod("/lib/pulse5/engine/errors.ts")).ErrorCode;
+});
+
+test("2000 USDT round-start balance yields 200 / 500 / 1000 shortcuts", () => {
+  assert.deepEqual(quickAmountsFor(2000), [200, 500, 1000]);
 });
 
 after(async () => {

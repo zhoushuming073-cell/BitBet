@@ -79,7 +79,25 @@ class MemoryStore {
   }
 }
 
+class AsyncMutex {
+  private tail: Promise<void> = Promise.resolve();
+
+  async run<T>(operation: () => Promise<T> | T): Promise<T> {
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => { release = resolve; });
+    const previous = this.tail;
+    this.tail = previous.then(() => next);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+}
+
 const store = new MemoryStore();
+const transactionMutex = new AsyncMutex();
 
 const nowMs = () => Date.now();
 
@@ -90,8 +108,8 @@ function newId(prefix: string): string {
 // ---- repositories ---------------------------------------------------------
 
 const users: UserRepository = {
-  async createUser({ authUid, username, now }) {
-    const user: User = { _id: authUid, authUid, username, status: "active", createdAt: now, lastLoginAt: now };
+  async createUser({ authUid, email, username, now }) {
+    const user: User = { _id: authUid, authUid, email, username, status: "active", createdAt: now, lastLoginAt: now };
     store.upsert("users", authUid, user);
     return user;
   },
@@ -227,37 +245,40 @@ const settlements: SettlementRepository = {
   },
 };
 
-/** Atomic claim: single-threaded (no awaits) so mark + credit + ledger is one step. */
+/** Atomic claim protected by a mutex so concurrent promises cannot double-credit. */
 async function claimAtomic(userId: string, settlementId: string, now: number): Promise<ClaimResult> {
-  const s = store.get<SettlementRecord>("settlements", settlementId);
-  if (!s) throw new Error("settlement not found");
-  if (s.userId !== userId) throw new Error("无权领取该结算");
-  if (s.claimStatus === "claimed") return { alreadyClaimed: true, amount: 0 };
+  return transactionMutex.run(async () => {
+    const s = store.get<SettlementRecord>("settlements", settlementId);
+    if (!s) throw new Error("settlement not found");
+    if (s.userId !== userId) throw new Error("无权领取该结算");
+    if (s.claimStatus === "claimed") return { alreadyClaimed: true, amount: 0 };
 
-  const w = store.get<Wallet>("wallets", userId);
-  if (!w) throw new Error("wallet not found");
-
-  const amount = s.payout;
-  store.upsert("settlements", settlementId, { ...s, claimStatus: "claimed", claimedAt: now });
-  store.upsert("wallets", userId, {
-    ...w,
-    pendingClaim: money(Math.max(0, w.pendingClaim - amount)),
-    availableBalance: money(w.availableBalance + amount),
-    totalClaimed: money(w.totalClaimed + amount),
-    updatedAt: now,
-    version: w.version + 1,
+    const w = store.get<Wallet>("wallets", userId);
+    if (!w) throw new Error("wallet not found");
+    const amount = s.payout;
+    store.upsert("settlements", settlementId, { ...s, claimStatus: "claimed", claimedAt: now });
+    const expectedPending = money(store.list<SettlementRecord>("settlements")
+      .filter((row) => row.userId === userId && row.claimStatus === "pending")
+      .reduce((sum, row) => sum + row.payout, 0));
+    store.upsert("wallets", userId, {
+      ...w,
+      pendingClaim: expectedPending,
+      availableBalance: money(w.availableBalance + amount),
+      totalClaimed: money(w.totalClaimed + amount),
+      updatedAt: now,
+      version: w.version + 1,
+    });
+    appendLedger({ userId, type: "CLAIM", amount, balanceAfter: money(w.availableBalance + amount), settlementId, createdAt: now });
+    return { alreadyClaimed: false, amount };
   });
-  appendLedger({ userId, type: "CLAIM", amount, balanceAfter: money(w.availableBalance + amount), settlementId, createdAt: now });
-
-  return { alreadyClaimed: false, amount };
 }
 
 const leaderboard: LeaderboardRepository = {
   async upsertStats(stats) {
     store.upsert("leaderboard_stats", stats.userId, stats);
   },
-  async listTop(sortBy, limit) {
-    const rows = store.list<LeaderboardStats>("leaderboard_stats");
+  async listTop(sortBy, limit, minOrders = 0) {
+    const rows = store.list<LeaderboardStats>("leaderboard_stats").filter((row) => row.totalOrders >= minOrders);
     rows.sort((a, b) => (b[sortBy] ?? 0) - (a[sortBy] ?? 0));
     return rows.slice(0, limit);
   },
@@ -272,6 +293,134 @@ const leaderboard: LeaderboardRepository = {
   },
 };
 
+async function placeOrderAtomic(
+  userId: string,
+  order: OrderRecord,
+  now: number,
+): Promise<{ wallet: Wallet; alreadyExisted: boolean }> {
+  return transactionMutex.run(async () => {
+    const existing = store.list<OrderRecord>("orders").find(
+      (row) => row.userId === userId && row.idempotencyKey === order.idempotencyKey,
+    );
+    const wallet = store.get<Wallet>("wallets", userId);
+    if (!wallet) throw new Error("wallet not found");
+    if (existing) return { wallet, alreadyExisted: true };
+    if (wallet.availableBalance + 1e-9 < order.stake) throw new Error("insufficient balance");
+    const updated: Wallet = {
+      ...wallet,
+      availableBalance: money(wallet.availableBalance - order.stake),
+      totalStaked: money(wallet.totalStaked + order.stake),
+      updatedAt: now,
+      version: wallet.version + 1,
+    };
+    store.upsert("wallets", userId, updated);
+    store.upsert("orders", order.orderId, order);
+    appendLedger({
+      userId,
+      type: "BET",
+      amount: -order.stake,
+      balanceAfter: updated.availableBalance,
+      roundId: order.roundId,
+      orderId: order.orderId,
+      createdAt: now,
+    });
+    return { wallet: updated, alreadyExisted: false };
+  });
+}
+
+async function claimAllAtomic(userId: string, now: number): Promise<{ amount: number; count: number }> {
+  return transactionMutex.run(async () => {
+    const wallet = store.get<Wallet>("wallets", userId);
+    if (!wallet) throw new Error("wallet not found");
+    const pending = store.list<SettlementRecord>("settlements").filter(
+      (row) => row.userId === userId && row.claimStatus === "pending",
+    );
+    const amount = money(pending.reduce((sum, row) => sum + row.payout, 0));
+    if (!pending.length) return { amount: 0, count: 0 };
+    for (const row of pending) {
+      store.upsert("settlements", row.settlementId, { ...row, claimStatus: "claimed", claimedAt: now });
+      appendLedger({
+        userId,
+        type: "CLAIM",
+        amount: row.payout,
+        balanceAfter: money(wallet.availableBalance + amount),
+        settlementId: row.settlementId,
+        createdAt: now,
+      });
+    }
+    const updated: Wallet = {
+      ...wallet,
+      availableBalance: money(wallet.availableBalance + amount),
+      pendingClaim: 0,
+      totalClaimed: money(wallet.totalClaimed + amount),
+      updatedAt: now,
+      version: wallet.version + 1,
+    };
+    store.upsert("wallets", userId, updated);
+    return { amount, count: pending.length };
+  });
+}
+
+async function pendingClaimConsistency(userId: string) {
+  const wallet = store.get<Wallet>("wallets", userId);
+  if (!wallet) throw new Error("wallet not found");
+  const expected = money(store.list<SettlementRecord>("settlements")
+    .filter((row) => row.userId === userId && row.claimStatus === "pending")
+    .reduce((sum, row) => sum + row.payout, 0));
+  return { cached: wallet.pendingClaim, expected, consistent: wallet.pendingClaim === expected };
+}
+
+async function rebuildPendingClaim(userId: string, now: number): Promise<Wallet> {
+  return transactionMutex.run(async () => {
+    const wallet = store.get<Wallet>("wallets", userId);
+    if (!wallet) throw new Error("wallet not found");
+    const expected = money(store.list<SettlementRecord>("settlements")
+      .filter((row) => row.userId === userId && row.claimStatus === "pending")
+      .reduce((sum, row) => sum + row.payout, 0));
+    const updated = { ...wallet, pendingClaim: expected, updatedAt: now, version: wallet.version + 1 };
+    store.upsert("wallets", userId, updated);
+    return updated;
+  });
+}
+
+async function recordSettlementAtomic(settlement: SettlementRecord, now: number) {
+  return transactionMutex.run(async () => {
+    const wallet = store.get<Wallet>("wallets", settlement.userId);
+    if (!wallet) throw new Error("wallet not found");
+    const existing = store.get<SettlementRecord>("settlements", settlement.settlementId);
+    if (existing) return { created: false, wallet };
+    store.upsert("settlements", settlement.settlementId, settlement);
+    if (settlement.claimStatus !== "pending" || settlement.payout <= 0) {
+      return { created: true, wallet };
+    }
+    const expectedPending = money(store.list<SettlementRecord>("settlements")
+      .filter((row) => row.userId === settlement.userId && row.claimStatus === "pending")
+      .reduce((sum, row) => sum + row.payout, 0));
+    const updated = {
+      ...wallet,
+      pendingClaim: expectedPending,
+      updatedAt: now,
+      version: wallet.version + 1,
+    };
+    store.upsert("wallets", settlement.userId, updated);
+    return { created: true, wallet: updated };
+  });
+}
+
 export function createMemoryRepositories(): Repositories {
-  return { users, profiles, wallets, orders, rounds, settlements, leaderboard, claim: claimAtomic };
+  return {
+    users,
+    profiles,
+    wallets,
+    orders,
+    rounds,
+    settlements,
+    leaderboard,
+    claim: claimAtomic,
+    placeOrder: placeOrderAtomic,
+    claimAll: claimAllAtomic,
+    pendingClaimConsistency,
+    rebuildPendingClaim,
+    recordSettlement: recordSettlementAtomic,
+  };
 }

@@ -12,9 +12,34 @@ export interface CloudBaseApp {
 }
 
 export interface CloudBaseAuth {
-  getLoginState(): Promise<{ user?: { uid?: string } } | null>;
-  anonymousAuthProvider(): { signIn(): Promise<unknown> };
+  getLoginState(): Promise<{ user?: CloudBaseAuthUser } | null>;
+  getUser(): Promise<{ data: { user?: CloudBaseAuthUser | null }; error: CloudBaseAuthError | null }>;
+  getAccessToken(): Promise<{ accessToken: string; env: string }>;
+  signInAnonymously(): Promise<CloudBaseAuthResult>;
+  signUp(input: { email: string; password: string; username: string; name?: string }): Promise<{
+    data: { verifyOtp?: (input: { token: string }) => Promise<CloudBaseAuthResult> };
+    error: CloudBaseAuthError | null;
+  }>;
+  signInWithPassword(input: { email: string; password: string }): Promise<CloudBaseAuthResult>;
   signOut(): Promise<unknown>;
+}
+
+export interface CloudBaseAuthUser {
+  id?: string;
+  uid?: string;
+  email?: string | null;
+  is_anonymous?: boolean;
+  user_metadata?: { username?: string; name?: string };
+}
+
+export interface CloudBaseAuthError {
+  code?: string;
+  message?: string;
+}
+
+export interface CloudBaseAuthResult {
+  data: { user?: CloudBaseAuthUser | null; session?: { access_token?: string } | null };
+  error: CloudBaseAuthError | null;
 }
 
 export interface CloudBaseDatabase {

@@ -89,7 +89,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--ring); outl
   background: rgba(11, 16, 21, 0.94);
 }
 
-.brand, .topbar-actions, .connection, .reset-button {
+.brand, .topbar-actions, .connection, .bot-presence, .reset-button {
   display: flex;
   align-items: center;
 }
@@ -100,6 +100,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--ring); outl
 .topbar-actions { gap: 22px; }
 .connection { gap: 7px; color: #9aa5af; font-size: 13px; white-space: nowrap; }
 .connection svg { width: 16px; color: var(--up); }
+.bot-presence { gap: 7px; color: #aeb7c0; font-size: 13px; white-space: nowrap; }
+.bot-presence svg { width: 16px; color: var(--primary); }
 .balance { display: grid; gap: 1px; padding-left: 22px; border-left: 1px solid #26313b; }
 .balance > span { color: #7d8994; font-size: 12px; }
 .balance strong { font-size: 15px; font-weight: 650; }
@@ -111,7 +113,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--ring); outl
 
 .page-content { width: min(1480px, 100%); margin: 0 auto; padding: 18px 22px 0; }
 .play-grid { display: grid; grid-template-columns: minmax(0, 1.72fr) minmax(350px, 0.78fr); gap: 14px; align-items: stretch; }
-.market-panel, .prediction-panel, .open-orders, .history-panel {
+.market-panel, .prediction-panel, .weekly-board, .open-orders, .history-panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: rgba(16, 23, 30, 0.96);
@@ -176,6 +178,28 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--ring); outl
 .form-message { display: flex; align-items: flex-start; gap: 8px; margin-top: 11px; padding: 10px 11px; border: 1px solid rgba(240, 93, 94, 0.3); border-radius: 9px; background: rgba(240, 93, 94, 0.08); color: #f39a9b; font-size: 12px; line-height: 1.45; }
 .form-message.success { border-color: rgba(53, 200, 120, 0.3); background: rgba(53, 200, 120, 0.08); color: #7cdda9; }
 .form-message svg { width: 15px; flex: none; margin-top: 1px; }
+
+.weekly-board { margin-top: 14px; overflow: hidden; }
+.board-heading { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 22px; border-bottom: 1px solid #263039; }
+.board-heading h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 16px; font-weight: 680; }
+.board-heading h2 svg { width: 17px; color: var(--primary); }
+.board-heading p { margin: 4px 0 0; color: #7f8a94; font-size: 12px; }
+.board-count { color: #7f8a94; font-size: 12px; }
+.board-list { display: grid; }
+.board-row { min-height: 58px; display: grid; grid-template-columns: 36px 34px minmax(130px, 1fr) 70px 120px 130px; align-items: center; gap: 10px; padding: 0 22px; border-top: 1px solid #202a33; }
+.board-row:first-child { border-top: 0; background: linear-gradient(90deg, rgba(247, 147, 26, 0.055), transparent 48%); }
+.board-rank { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; color: #78838d; font-family: var(--font-mono); font-size: 12px; }
+.board-rank.rank-1 { background: rgba(247, 147, 26, 0.15); color: #ffc176; }
+.board-avatar { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: #202a33; color: #dce1e5; font-size: 12px; font-weight: 750; }
+.board-avatar.you { background: rgba(53, 200, 120, 0.14); color: #7cdda9; }
+.board-avatar.orange { background: rgba(247, 147, 26, 0.14); color: #ffc176; }
+.board-avatar.slate { background: rgba(130, 145, 160, 0.15); color: #bac5cf; }
+.board-player { display: grid; gap: 2px; }
+.board-player strong { font-size: 14px; font-weight: 650; }
+.board-player small, .board-assets small { color: #71808c; font-size: 11px; }
+.board-orders { color: #7f8a94; font-size: 12px; }
+.board-profit { text-align: right; font-family: var(--font-mono); font-size: 14px; font-weight: 650; }
+.board-assets { display: grid; justify-items: end; gap: 2px; color: #b9c2ca; font-family: var(--font-mono); font-size: 12px; }
 
 .open-orders { margin-top: 14px; overflow: hidden; }
 .open-orders .section-heading, .history-panel .section-heading { min-height: 68px; display: flex; align-items: center; padding: 0 22px; border-bottom: 1px solid #263039; }
@@ -258,12 +282,13 @@ footer svg { width: 15px; color: #87929c; }
   .brand { font-size: 15px; gap: 8px; }
   .brand-mark { width: 26px; height: 26px; border-radius: 7px; }
   .brand-mark svg { width: 16px; height: 16px; }
-  .connection, .balance > span, .reset-button span { display: none; }
+  .connection, .bot-presence span, .balance > span, .reset-button span { display: none; }
   .topbar-actions { gap: 10px; }
   .balance { padding-left: 0; border-left: 0; gap: 0; }
   .balance strong { font-size: 14px; }
   .balance small { font-size: 11px; }
   .reset-button { width: 32px; height: 32px; padding: 0; justify-content: center; }
+  .bot-presence { width: 28px; height: 28px; justify-content: center; }
 
   .page-content { width: 100%; padding: 6px 6px 0; }
   .play-grid { gap: 6px; }
@@ -300,6 +325,17 @@ footer svg { width: 15px; color: #87929c; }
   .side-choice button { min-height: 68px; gap: 3px; border-radius: 9px; }
   .side-odds { font-size: 15px; }
   .submit-prediction { min-height: 46px; margin-top: 12px; font-size: 15px; border-radius: 9px; }
+
+  .weekly-board { margin-top: 6px; }
+  .board-heading { min-height: 48px; padding: 0 12px; }
+  .board-heading h2 { font-size: 14px; }
+  .board-heading p { font-size: 11px; }
+  .board-count { display: none; }
+  .board-row { min-height: 50px; grid-template-columns: 26px 30px minmax(84px, 1fr) 94px; gap: 7px; padding: 0 12px; }
+  .board-orders, .board-assets { display: none; }
+  .board-profit { font-size: 12px; }
+  .board-avatar { width: 27px; height: 27px; border-radius: 8px; }
+  .board-player strong { font-size: 13px; }
 
   /* Open orders — per-order compact list, internal scroll past ~4 rows */
   .open-orders { margin-top: 6px; }
