@@ -7,7 +7,7 @@ export const GAME_CONFIG = {
   INITIAL_BALANCE: 10_000,
   USER_ID: "local",
 
-  // Round timing — strict Binance 5m kline boundaries (00/05/10/.../55).
+  // Round timing — strict UTC 5m candle boundaries (00/05/10/.../55).
   ROUND_DURATION_MS: 5 * 60 * 1000,
   BET_LOCK_SECONDS: 15,
   BET_LOCK_MS: 15 * 1000,

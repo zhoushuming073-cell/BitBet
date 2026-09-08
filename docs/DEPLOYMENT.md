@@ -5,7 +5,7 @@
 - 站点：OpenAI Sites / Cloudflare Worker 运行时。
 - 身份：Sites 网关注入的 ChatGPT 用户 ID；客户端提交的 `userId` 不受信任。
 - 数据：D1 的 `game_actor_ledgers`、`lambda_configs`、`bot_scheduler_leases`。
-- 行情：服务端从 Binance 公共市场数据接口读取盘口、1 分钟/1 秒 K 线与官方 5 分钟结算 K 线。
+- 行情：客户端与服务端统一使用 OKX BTC/USDT 公共市场数据；服务端读取盘口、分钟 K 线和官方 5 分钟结算 K 线。
 - 权威路径：玩家下单、Bot 决策、实际执行赔率、资金扣减、结算和领取都在服务端完成。
 - 并发：账本使用版本号进行乐观并发控制；调度器使用 D1 lease 避免重复执行。
 

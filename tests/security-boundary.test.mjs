@@ -34,7 +34,7 @@ test("客户端价格回退必须同时是非 production 且显式开启", async
   delete process.env.ALLOW_CLIENT_MARKET_PRICE_DEV;
   assert.match(source, /process\.env\.NODE_ENV !== "production"/);
   assert.match(source, /ALLOW_CLIENT_MARKET_PRICE_DEV === "true"/);
-  assert.match(source, /data-api\.binance\.vision/);
+  assert.match(source, /www\.okx\.com\/api\/v5\/market/);
   if (previous === undefined) delete process.env.ALLOW_CLIENT_MARKET_PRICE_DEV;
   else process.env.ALLOW_CLIENT_MARKET_PRICE_DEV = previous;
 });

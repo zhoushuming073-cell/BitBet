@@ -1,5 +1,5 @@
 import type { PricePointLike } from "../engine/types";
-import type { AggTrade } from "./BinanceFeedManager";
+import type { AggTrade } from "./OkxFeedManager";
 
 /**
  * Rolling price-buffer utilities. One unified buffer feeds the chart: initial
@@ -11,7 +11,7 @@ import type { AggTrade } from "./BinanceFeedManager";
  */
 export const BUFFER_WINDOW_MS = 90_000;
 
-/** Binance timestamps are ms. Normalize anything given in seconds (e.g. < 1e12). */
+/** Normalize exchange timestamps to milliseconds. */
 export function normalizeTimestamp(ts: number): number {
   if (!Number.isFinite(ts)) return 0;
   return ts < 1e12 ? ts * 1000 : ts;

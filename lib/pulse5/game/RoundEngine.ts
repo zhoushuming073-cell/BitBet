@@ -11,7 +11,7 @@ export interface RoundWindow {
 }
 
 /**
- * Rounds are strictly aligned to Binance 5m kline boundaries:
+ * Rounds are strictly aligned to UTC 5m candle boundaries:
  * 00, 05, 10, ..., 55 minutes past the hour.
  */
 export function roundFor(nowMs: number): RoundWindow {

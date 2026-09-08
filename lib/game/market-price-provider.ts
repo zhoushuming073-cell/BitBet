@@ -1,6 +1,10 @@
 import { roundFor } from "@/lib/pulse5/game/RoundEngine";
 
-const BINANCE_MARKET_API = "https://data-api.binance.vision";
+const OKX_MARKET_API = "https://www.okx.com/api/v5/market";
+const INSTRUMENT = "BTC-USDT";
+
+type OkxCandle = [string, string, string, string, string, string, string, string, string];
+type OkxTrade = { px: string; ts: string };
 
 export interface ServerMarketSnapshot {
   midPrice: number;
@@ -22,6 +26,22 @@ export function configureMarketPriceProvider(next: MarketPriceProvider): void {
   provider = next;
 }
 
+async function okxQuery<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${OKX_MARKET_API}${path}`, {
+    signal,
+    cache: "no-store",
+    headers: { Accept: "application/json", "User-Agent": "BitBet-Market/1.0" },
+  });
+  if (!response.ok) throw new Error(`BTC 行情请求失败 ${response.status}`);
+  const payload = await response.json() as { code?: string; msg?: string; data?: T };
+  if (payload.code !== "0" || !payload.data) throw new Error(payload.msg || "BTC 行情返回无效");
+  return payload.data;
+}
+
+function ascendingCandles(rows: OkxCandle[]) {
+  return [...rows].sort((a, b) => Number(a[0]) - Number(b[0]));
+}
+
 export async function getServerMarketSnapshot(now: number, devClientPrice?: number): Promise<ServerMarketSnapshot> {
   if (provider) return provider.getSnapshot(now);
   const allowDevPrice = Number.isFinite(devClientPrice) || (process.env.NODE_ENV !== "production"
@@ -39,37 +59,37 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
       priceSamples: Array.from({ length: 60 }, (_, index) => ({ time: now - (59 - index) * 1000, price: midPrice + index * 0.05 })),
     };
   }
+
   const round = roundFor(now);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
-    const query = async <T>(path: string): Promise<T> => {
-      const response = await fetch(`${BINANCE_MARKET_API}${path}`, { signal: controller.signal, cache: "no-store" });
-      if (!response.ok) throw new Error(`Binance 行情请求失败 ${response.status}`);
-      return response.json() as Promise<T>;
-    };
-    const [book, minuteRows, secondRows] = await Promise.all([
-      query<{ bidPrice: string; askPrice: string }>("/api/v3/ticker/bookTicker?symbol=BTCUSDT"),
-      query<Array<Array<string | number>>>("/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=80"),
-      query<Array<Array<string | number>>>("/api/v3/klines?symbol=BTCUSDT&interval=1s&limit=70").catch(() => []),
+    const [tickers, rawMinutes, rawTrades] = await Promise.all([
+      okxQuery<Array<{ bidPx: string; askPx: string; last: string; ts: string }>>(`/ticker?instId=${INSTRUMENT}`, controller.signal),
+      okxQuery<OkxCandle[]>(`/candles?instId=${INSTRUMENT}&bar=1m&limit=80`, controller.signal),
+      okxQuery<OkxTrade[]>(`/trades?instId=${INSTRUMENT}&limit=500`, controller.signal).catch(() => []),
     ]);
-    const bid = Number(book.bidPrice);
-    const ask = Number(book.askPrice);
-    const midPrice = (bid + ask) / 2;
-    const roundOpen = Number(minuteRows.find((row) => Number(row[0]) === round.id)?.[1]);
+    const ticker = tickers[0];
+    const minuteRows = ascendingCandles(rawMinutes);
+    const bid = Number(ticker?.bidPx);
+    const ask = Number(ticker?.askPx);
+    const lastPrice = Number(ticker?.last);
+    const midPrice = bid > 0 && ask > 0 ? (bid + ask) / 2 : lastPrice;
+    const roundRow = minuteRows.find((row) => Number(row[0]) === round.id);
+    const roundOpen = Number(roundRow?.[1] ?? midPrice);
     if (![bid, ask, midPrice, roundOpen].every((value) => Number.isFinite(value) && value > 0)) {
-      throw new Error("Binance 行情字段无效");
+      throw new Error("BTC 行情字段无效");
     }
-    const priceSamples = (secondRows.length ? secondRows : minuteRows.slice(-2)).map((row) => ({
-      time: Number(row[0]),
-      price: Number(row[4]),
-    })).filter((item) => Number.isFinite(item.time) && Number.isFinite(item.price) && item.time <= now);
+    const priceSamples = rawTrades
+      .map((row) => ({ time: Number(row.ts), price: Number(row.px) }))
+      .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.price) && item.price > 0 && item.time <= now)
+      .sort((a, b) => a.time - b.time);
     if (priceSamples.at(-1)?.time !== now) priceSamples.push({ time: now, price: midPrice });
     return {
       midPrice,
       bid,
       ask,
-      observedAt: now,
+      observedAt: Math.min(now, Number(ticker.ts) || now),
       roundOpen,
       volatilityCloses: minuteRows.map((row) => Number(row[4])).filter((value) => Number.isFinite(value) && value > 0),
       priceSamples,
@@ -80,34 +100,39 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
 }
 
 export async function getClosedServerCandle(roundId: number) {
-  const response = await fetch(
-    `${BINANCE_MARKET_API}/api/v3/klines?symbol=BTCUSDT&interval=5m&startTime=${roundId}&limit=1`,
-    { cache: "no-store" },
+  const rows = await okxQuery<OkxCandle[]>(
+    `/history-candles?instId=${INSTRUMENT}&bar=5m&after=${roundId + 5 * 60 * 1000}&before=${Math.max(0, roundId - 1)}&limit=2`,
   );
-  if (!response.ok) throw new Error(`Binance 结算行情请求失败 ${response.status}`);
-  const rows = await response.json() as Array<Array<string | number>>;
-  const row = rows[0];
-  if (!row || Number(row[6]) >= Date.now()) return null;
-  return { open: Number(row[1]), close: Number(row[4]), closeTime: Number(row[6]) };
+  const row = rows.find((item) => Number(item[0]) === roundId);
+  if (!row || roundId + 5 * 60 * 1000 > Date.now()) return null;
+  return { open: Number(row[1]), close: Number(row[4]), closeTime: roundId + 5 * 60 * 1000 - 1 };
 }
 
-/** Historical 1s bars used only to replay missed Bot evaluations after downtime. */
+/** Historical replay uses only candle values that were visible at each minute close. */
 export async function getHistoricalRoundMarket(roundId: number) {
   const round = roundFor(roundId);
-  const response = await fetch(
-    `${BINANCE_MARKET_API}/api/v3/klines?symbol=BTCUSDT&interval=1s&startTime=${round.start}&endTime=${round.end - 1}&limit=300`,
-    { cache: "no-store" },
-  );
-  if (!response.ok) throw new Error(`Binance 历史行情请求失败 ${response.status}`);
-  const rows = await response.json() as Array<Array<string | number>>;
-  const samples = rows.map((row) => ({ time: Number(row[0]), price: Number(row[4]) }))
-    .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.price) && item.price > 0);
-  if (samples.length < 30) return null;
+  const rows = ascendingCandles(await okxQuery<OkxCandle[]>(
+    `/history-candles?instId=${INSTRUMENT}&bar=1m&after=${round.end}&before=${Math.max(0, round.start - 1)}&limit=6`,
+  )).filter((row) => Number(row[0]) >= round.start && Number(row[0]) < round.end);
+  if (!rows.length) return null;
+
+  // A minute candle is not exposed before it closes. Repeating its close after
+  // that timestamp creates a step series without inventing intraminute prices.
+  const samples: Array<{ time: number; price: number }> = [];
+  for (const row of rows) {
+    const visibleAt = Number(row[0]) + 60_000;
+    const price = Number(row[4]);
+    for (let time = visibleAt; time < Math.min(visibleAt + 60_000, round.end); time += 5_000) {
+      samples.push({ time, price });
+    }
+  }
+  const first = rows[0];
+  const last = rows.at(-1)!;
   return {
     round,
-    open: Number(rows[0][1]),
-    close: Number(rows.at(-1)?.[4]),
-    closeTime: Number(rows.at(-1)?.[6]),
+    open: Number(first[1]),
+    close: Number(last[4]),
+    closeTime: round.end - 1,
     samples,
   };
 }

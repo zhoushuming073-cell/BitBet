@@ -16,7 +16,7 @@ export type BettingState =
 
 // ---- Market snapshot produced by the feed/estimator at a moment in time ----
 export interface MarketSnapshot {
-  /** Binance trade/last price (for display). */
+  /** Public exchange trade/last price (for display). */
   lastPrice: number;
   /** Mid = (bestBid + bestAsk) / 2 — the odds engine uses this. */
   midPrice: number;

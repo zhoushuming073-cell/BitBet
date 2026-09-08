@@ -20,7 +20,7 @@ export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
 export const USER_FACING_MESSAGE: Record<ErrorCodeType, string> = {
   ROUND_LOCKED: "本轮已封盘，最后 15 秒禁止下单",
   NO_ROUND_OPEN: "正在连接行情…",
-  MARKET_OFFLINE: "正在连接 Binance 行情",
+  MARKET_OFFLINE: "正在连接 BTC 行情",
   VOLATILITY_WARMING_UP: "行情预热中，暂时无法下注",
   MARKET_ONE_SIDED: "行情一边倒，暂不可成交",
   INSUFFICIENT_BALANCE: "可用虚拟余额不足",

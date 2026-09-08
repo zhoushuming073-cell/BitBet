@@ -44,7 +44,7 @@ function summarize(roundId: number, orders: Order[], result: RoundResult): Round
 
 /**
  * SettlementService (req 50-53, 79).
- * Official Binance 5m kline open/close decides UP/DOWN/DRAW. Every order settles
+ * Official exchange 5m kline open/close decides UP/DOWN/DRAW. Every order settles
  * at its OWN locked odds. DRAW refunds every stake with no takeout. settleRound
  * is idempotent — calling it again never credits the balance twice.
  *

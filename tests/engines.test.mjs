@@ -301,7 +301,7 @@ test("ledger snapshot/rehydration restores balance and open orders", () => {
 });
 
 // ---- round boundaries align to 5m and lock = end - 15s ----
-test("rounds align to Binance 5m boundaries with a 15s lock", () => {
+test("rounds align to UTC 5m boundaries with a 15s lock", () => {
   const r = RoundEngine.roundFor(R + 12_345);
   assert.equal(r.id, R);
   assert.equal(r.end - r.start, CFG.ROUND_DURATION_MS);

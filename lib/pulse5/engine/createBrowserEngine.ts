@@ -1,6 +1,6 @@
 import { GAME_CONFIG } from "../game/gameConfig";
 import { roundFor } from "../game/RoundEngine";
-import { BinanceFeedManager } from "../market/BinanceFeedManager";
+import { OkxFeedManager } from "../market/OkxFeedManager";
 import { BUFFER_WINDOW_MS, bucketAggTrades } from "../market/priceBuffer";
 import { Pulse5Engine } from "./Pulse5Engine";
 import type { LedgerPersister } from "../orders/LedgerStore";
@@ -42,9 +42,9 @@ export interface BrowserEngineOptions {
 }
 
 /**
- * Wires the authoritative engine to the live Binance feed, the clock,
+ * Wires the display engine to the same live OKX BTC/USDT market used by the server,
  * round-open discovery, chart/volatility sampling and restart catch-up
- * settlement. Everything virtual; no order is ever sent to Binance.
+ * settlement. Everything is virtual; no order is ever sent to OKX.
  */
 export function createBrowserEngine(options: BrowserEngineOptions = {}): BrowserRuntime {
   const storageKey = options.storageKey ?? GAME_CONFIG.STORAGE_KEY;
@@ -68,7 +68,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
 
   // Feed events arrive many times per second. Coalesce them into a steady,
   // near-live UI cadence (instead of only refreshing on the slower clock) so
-  // prices/odds track Binance tightly without re-rendering every socket frame.
+  // prices/odds track the public feed tightly without re-rendering every socket frame.
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let lastFlush = 0;
   const requestFlush = () => {
@@ -81,7 +81,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
     }, wait);
   };
 
-  const feed = new BinanceFeedManager({
+  const feed = new OkxFeedManager({
     onBook: (bid, ask, ts) => {
       lastFeedTs = Date.now();
       engine.onBookTicker(bid, ask, ts);
@@ -119,7 +119,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
 
   async function ensureRoundOpen(roundId: number): Promise<void> {
     try {
-      const rows = await BinanceFeedManager.fetchKlines("5m", 1, roundId);
+      const rows = await OkxFeedManager.fetchKlines("5m", 1, roundId);
       if (!disposed && rows[0] && rows[0][0] === roundId) {
         engine.setRoundOpen(roundId, Number(rows[0][1]));
       }
@@ -134,10 +134,10 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
     settling.add(roundId);
     try {
       const waitedSince = Date.now();
-      let candle = await BinanceFeedManager.fetchClosedCandle(roundId, Date.now());
+      let candle = await OkxFeedManager.fetchClosedCandle(roundId, Date.now());
       while (candle && !candle.closed && Date.now() - waitedSince < GAME_CONFIG.SETTLE_MAX_WAIT_MS) {
         await new Promise((resolve) => setTimeout(resolve, GAME_CONFIG.SETTLE_RETRY_MS));
-        candle = await BinanceFeedManager.fetchClosedCandle(roundId, Date.now());
+        candle = await OkxFeedManager.fetchClosedCandle(roundId, Date.now());
       }
       if (candle && candle.closed) {
         engine.settle(roundId, candle.open, candle.close, Date.now());
@@ -159,7 +159,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
   async function backfillGap(): Promise<void> {
     const now = Date.now();
     try {
-      const trades = await BinanceFeedManager.fetchAggTrades(now - BUFFER_WINDOW_MS, now);
+      const trades = await OkxFeedManager.fetchAggTrades(now - BUFFER_WINDOW_MS, now);
       if (!disposed) engine.mergeChart(bucketAggTrades(trades));
     } catch {
       /* ignore — live feed keeps appending */
@@ -189,7 +189,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
     // 1) Chart history: dense aggTrades bucketed to ~250ms. Falls back to sparse
     //    1m klines only if aggTrades fails — and never clears existing points.
     try {
-      const trades = await BinanceFeedManager.fetchAggTrades(now - 70_000, now);
+      const trades = await OkxFeedManager.fetchAggTrades(now - 70_000, now);
       if (!disposed) {
         const points = bucketAggTrades(trades);
         engine.seedChart(points);
@@ -197,7 +197,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
       }
     } catch {
       try {
-        const rows = await BinanceFeedManager.fetchKlines("1m", 3);
+        const rows = await OkxFeedManager.fetchKlines("1m", 3);
         if (!disposed) {
           engine.seedChart(rows.map((row) => ({ time: Number(row[0]), price: Number(row[4]) })));
         }
@@ -208,7 +208,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
 
     // 2) Volatility warm-up: 1m klines (separate from the chart series).
     try {
-      const rows = await BinanceFeedManager.fetchKlines("1m", 80);
+      const rows = await OkxFeedManager.fetchKlines("1m", 80);
       if (!disposed) engine.seedVolatility(rows.map((row) => Number(row[4])));
     } catch {
       /* live feed will still warm the estimator over time */
