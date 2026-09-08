@@ -280,7 +280,7 @@ export async function tickAuthorityCompetition(userId: string, displayName = "ä½
   // Acquire the shared lease before touching the exchange. Multiple tabs for the
   // same player otherwise multiplied Kraken requests even though only one tick
   // was allowed to mutate the ledgers.
-  const hasLease = await repo.acquireLease(`online-tick:${userId}`, 4_000);
+  const hasLease = await repo.acquireLease(`online-tick:${userId}`, 4_800);
   let market: ServerMarketSnapshot | null = null;
   if (hasLease) {
     try {
