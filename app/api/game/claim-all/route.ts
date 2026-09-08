@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
-import { claimAll } from "@/lib/game/server";
-import { authErrorResponse, requireUser } from "@/lib/auth/require-user";
+import { claimAuthorityAll } from "@/lib/pulse5/server/ServerAuthority";
+import { requireSiteUser, siteAuthError } from "@/lib/auth/sites-user";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const identity = requireUser(request);
-    const amount = await claimAll(identity.userId);
-    return NextResponse.json({ claimed: amount });
+    const identity = requireSiteUser(request);
+    const snapshot = await claimAuthorityAll(identity.userId);
+    return NextResponse.json({ snapshot });
   } catch (error) {
-    return authErrorResponse(error);
+    return siteAuthError(error);
   }
 }

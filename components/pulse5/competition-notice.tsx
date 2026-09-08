@@ -16,7 +16,7 @@ export function CompetitionNotice({ playerEngine, bots }: { playerEngine: Pulse5
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (bots.length !== 2) return;
+    if (bots.length !== 3) return;
     const standings = buildCompetitionStandings(playerEngine, bots);
     const current: NoticeSnapshot = {
       playerRank: standings.findIndex((row) => row.id === "you") + 1,

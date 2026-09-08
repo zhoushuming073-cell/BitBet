@@ -33,8 +33,12 @@ export interface BrowserRuntime {
 
 export interface BrowserEngineOptions {
   storageKey?: string;
+  /** Disable localStorage when the server owns the account ledger. */
+  persist?: boolean;
   /** Create only the ledger/engine; another trusted runtime mirrors market data. */
   passive?: boolean;
+  /** Keep settlement server-only while retaining the live display/quote feed. */
+  settlement?: boolean;
 }
 
 /**
@@ -44,7 +48,9 @@ export interface BrowserEngineOptions {
  */
 export function createBrowserEngine(options: BrowserEngineOptions = {}): BrowserRuntime {
   const storageKey = options.storageKey ?? GAME_CONFIG.STORAGE_KEY;
-  const persister = typeof localStorage !== "undefined" ? localStoragePersister(storageKey) : null;
+  const persister = options.persist !== false && typeof localStorage !== "undefined"
+    ? localStoragePersister(storageKey)
+    : null;
   const engine = new Pulse5Engine(persister);
 
   if (options.passive) {
@@ -92,7 +98,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
       // so the new round never has to wait on a REST round-trip to render.
       engine.setRoundOpen(openTime, open);
       // A just-closed candle kicks authoritative settlement immediately.
-      if (closed) void settleRoundOnce(openTime);
+      if (closed && options.settlement !== false) void settleRoundOnce(openTime);
       requestFlush();
     },
     onTicker: (ticker, ts) => {
@@ -173,7 +179,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
       lastChartTs = now;
       engine.appendPoint({ time: now, price: snapshot.midPrice });
     }
-    void settleDue(now);
+    if (options.settlement !== false) void settleDue(now);
   }, 250);
 
   // Initial data bootstrap.

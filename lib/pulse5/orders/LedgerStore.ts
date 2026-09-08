@@ -148,6 +148,18 @@ export class LedgerStore implements GameStateStore {
     this.persist();
   }
 
+  /** Replace local state with a server-authoritative ledger snapshot. */
+  restore(snapshot: LedgerSnapshot): void {
+    this.balance = sanitizeMoney(snapshot.balance, GAME_CONFIG.INITIAL_BALANCE);
+    this.orders = (Array.isArray(snapshot.orders) ? snapshot.orders : []).map((order) => ({
+      ...order,
+      claimed: typeof order.claimed === "boolean" ? order.claimed : order.status !== "OPEN",
+    }));
+    this.rounds = new Map(Object.entries(snapshot.rounds ?? {}));
+    this.idempotency = new Map(Object.entries(snapshot.idempotency ?? {}));
+    this.settledRounds = new Set(snapshot.settledRounds ?? []);
+  }
+
   snapshot(): LedgerSnapshot {
     return {
       balance: this.balance,

@@ -93,7 +93,7 @@ export function MobileCompetitionTabs({
                 {liveOrders.map(({ order, user, role }) => (
                   <div className="live-order-row" key={`${user}-${order.id}`}>
                     <span>{timeLabel(order.createdAt)}</span>
-                    <span className="live-order-user"><strong>{user}</strong><small>{role}{order.reason ? ` · ${order.reason}` : ""}</small></span>
+                    <span className="live-order-user"><strong>{user}</strong><small>{role}{order.reason ? ` · ${order.reason}` : ""}{order.strategyMeta?.executionOdds != null && order.strategyMeta.edge != null ? ` · ${order.strategyMeta.executionOdds.toFixed(2)}x · Edge ${(order.strategyMeta.edge * 100).toFixed(1)}%` : ""}</small></span>
                     <span className={order.side === "up" ? "up" : "down"}>{order.side === "up" ? "看涨" : "看跌"}</span>
                     <b>{money.format(order.stake)}</b>
                   </div>

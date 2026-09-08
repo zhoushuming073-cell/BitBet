@@ -4,11 +4,11 @@ import { computeWeeklyStats, type WeeklyStats } from "@/lib/pulse5/stats/weeklyS
 import type { TradingBotState } from "./use-trading-bots";
 
 export interface CompetitionStanding extends WeeklyStats {
-  id: "you" | "alpha" | "beta";
+  id: "you" | "alpha" | "beta" | "lambda";
   name: string;
   avatar: string;
   label: string;
-  accent: "you" | "orange" | "slate";
+  accent: "you" | "orange" | "slate" | "lambda";
 }
 
 export function buildCompetitionStandings(
@@ -30,7 +30,7 @@ export function buildCompetitionStandings(
     name: bot.definition.name,
     avatar: bot.definition.shortName,
     label: `${bot.status} · ${bot.definition.strategy.label}`,
-    accent: bot.definition.id === "alpha" ? "orange" : "slate",
+    accent: bot.definition.id === "alpha" ? "orange" : bot.definition.id === "lambda" ? "lambda" : "slate",
     ...computeWeeklyStats(bot.engine, weekStart, bot.skippedRoundIds, now),
   }));
   return [player, ...botRows].sort((a, b) => b.profit - a.profit || b.assets - a.assets);

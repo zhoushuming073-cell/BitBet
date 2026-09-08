@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
-import { getState } from "@/lib/game/server";
-import { authErrorResponse, requireUser } from "@/lib/auth/require-user";
+import { getAuthorityCompetition } from "@/lib/pulse5/server/ServerAuthority";
+import { requireSiteUser, siteAuthError } from "@/lib/auth/sites-user";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const identity = requireUser(request);
-    return NextResponse.json(await getState(identity.userId));
+    const identity = requireSiteUser(request);
+    const localPreview = /^(127\.0\.0\.1|localhost)$/.test(new URL(request.url).hostname) ? 110_000 : undefined;
+    return NextResponse.json(await getAuthorityCompetition(identity.userId, identity.displayName, undefined, localPreview));
   } catch (error) {
-    return authErrorResponse(error);
+    return siteAuthError(error);
   }
 }

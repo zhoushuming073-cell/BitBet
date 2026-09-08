@@ -42,6 +42,11 @@ const worker = {
 
     return handler.fetch(request, env, ctx);
   },
+  async scheduled(_event: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
+    const task = import("../lib/pulse5/server/ServerAuthority")
+      .then(({ advanceAllCompetitions }) => advanceAllCompetitions(env.DB as never));
+    ctx.waitUntil(task);
+  },
 };
 
 export default worker;

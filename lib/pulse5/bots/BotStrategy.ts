@@ -1,4 +1,4 @@
-import type { Side } from "@/lib/pulse5/engine/types";
+import type { Order, Side } from "@/lib/pulse5/engine/types";
 
 export interface VisiblePriceSample {
   time: number;
@@ -29,6 +29,12 @@ export interface BotDecisionContext {
   openOrderCount: number;
   lastOrderAt: number | null;
   lastOrderSide: Side | null;
+  currentOrders?: Order[];
+  estimateQuote?: (side: Side, stake: number) => {
+    executionOdds: number;
+    potentialPayout: number;
+    quotable: boolean;
+  } | null;
 }
 
 export interface BotDecision {
@@ -36,10 +42,11 @@ export interface BotDecision {
   stake: number;
   confidence: number;
   reason: string;
+  meta?: Order["strategyMeta"];
 }
 
 export interface BotStrategy {
-  readonly id: "alpha" | "beta";
+  readonly id: "alpha" | "beta" | "lambda";
   readonly name: string;
   readonly label: string;
   decide(context: BotDecisionContext): BotDecision;

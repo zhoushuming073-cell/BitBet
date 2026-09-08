@@ -19,6 +19,10 @@ export interface WeeklyStats {
   currentLossStreak: number;
   maxDrawdownPercent: number;
   skipCount: number;
+  participationRounds: number;
+  averageOrdersPerRound: number;
+  averageEdge: number;
+  hedgeCount: number;
   equityCurve: EquityPoint[];
 }
 
@@ -83,6 +87,8 @@ export function computeWeeklyStats(
   }
 
   const streak = streaks(settled);
+  const participationRounds = new Set(orders.map((order) => order.roundId)).size;
+  const modeled = orders.filter((order) => order.strategyMeta);
   return {
     profit,
     roi: (profit / GAME_CONFIG.INITIAL_BALANCE) * 100,
@@ -95,6 +101,10 @@ export function computeWeeklyStats(
     currentLossStreak: streak.currentLoss,
     maxDrawdownPercent,
     skipCount: new Set(skippedRoundIds.filter((roundId) => roundId >= weekStart && roundId <= now)).size,
+    participationRounds,
+    averageOrdersPerRound: participationRounds > 0 ? orders.length / participationRounds : 0,
+    averageEdge: modeled.length > 0 ? modeled.reduce((sum, order) => sum + (order.strategyMeta?.edge ?? 0), 0) / modeled.length : 0,
+    hedgeCount: modeled.filter((order) => order.strategyMeta?.adaptiveHedge).length,
     equityCurve,
   };
 }

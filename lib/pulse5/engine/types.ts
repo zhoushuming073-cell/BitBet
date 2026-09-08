@@ -109,6 +109,14 @@ export interface Order {
   idempotencyKey: string;
   /** Short strategy explanation for bot orders; absent for manual orders. */
   reason?: string;
+  /** Explainable decision facts captured at entry; never recomputed later. */
+  strategyMeta?: {
+    modelProbability?: number;
+    executionOdds?: number;
+    edge?: number;
+    signalScore?: number;
+    adaptiveHedge?: boolean;
+  };
   status: OrderStatus;
   payout: number;
   profit: number;

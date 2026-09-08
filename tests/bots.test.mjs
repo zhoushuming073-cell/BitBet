@@ -76,24 +76,27 @@ test("Bot strategy context has no future close or current settlement result", as
   assert.doesNotThrow(() => strategy.decide(context));
 });
 
-test("Bot hook submits through the same engine order API", async () => {
+test("Bot execution is server-authoritative and the browser only mirrors snapshots", async () => {
   const fs = await import("node:fs/promises");
   const hook = await fs.readFile(`${root}/components/pulse5/use-trading-bots.ts`, "utf8");
+  const authority = await fs.readFile(`${root}/lib/pulse5/server/ServerAuthority.ts`, "utf8");
   const contract = await fs.readFile(`${root}/lib/pulse5/bots/BotStrategy.ts`, "utf8");
-  assert.match(hook, /runtime\.engine\.placeOrder\(/);
+  assert.doesNotMatch(hook, /\.placeOrder\(/);
+  assert.match(hook, /restoreLedger\(payload\.snapshot\)/);
+  assert.match(authority, /engine\.placeOrder\(/);
   assert.doesNotMatch(hook, /ledger\.balance\s*=/);
   assert.doesNotMatch(contract, /closePrice|settlementResult|futurePrice/);
 });
 
 test("bots may place multiple mixed-direction orders in one round with unique keys", async () => {
   const fs = await import("node:fs/promises");
-  const hook = await fs.readFile(`${root}/components/pulse5/use-trading-bots.ts`, "utf8");
+  const authority = await fs.readFile(`${root}/lib/pulse5/server/ServerAuthority.ts`, "utf8");
   const alpha = await fs.readFile(`${root}/lib/pulse5/bots/BotAlphaStrategy.ts`, "utf8");
   const beta = await fs.readFile(`${root}/lib/pulse5/bots/BotBetaStrategy.ts`, "utf8");
-  assert.doesNotMatch(hook, /actedRounds/);
-  assert.match(hook, /orderSequence/);
-  assert.match(hook, /orderCooldownMs/);
-  assert.match(hook, /bot-\$\{bot\.definition\.id\}-\$\{roundId\}-\$\{now\}-\$\{bot\.orderSequence\}/);
+  assert.doesNotMatch(authority, /actedRounds/);
+  assert.match(authority, /orderSequence/);
+  assert.match(authority, /cooldown/);
+  assert.match(authority, /server-\$\{type\}-\$\{currentRound\}-\$\{now\}-\$\{record\.runtime\.orderSequence\}/);
   assert.doesNotMatch(alpha, /hasOpenOrder/);
   assert.doesNotMatch(beta, /hasOpenOrder/);
 });
@@ -106,10 +109,10 @@ test("weekly competition exposes no player reset control", async () => {
 
 test("bot-only rounds use an official closed candle for settlement", async () => {
   const fs = await import("node:fs/promises");
-  const hook = await fs.readFile(`${root}/components/pulse5/use-trading-bots.ts`, "utf8");
-  assert.match(hook, /fetchClosedCandle\(roundId, Date\.now\(\)\)/);
-  assert.match(hook, /engine\.settle\(roundId, candle\.open, candle\.close, settledAt\)/);
-  assert.match(hook, /roundsNeedingSettlement\(now\)/);
+  const authority = await fs.readFile(`${root}/lib/pulse5/server/ServerAuthority.ts`, "utf8");
+  assert.match(authority, /getClosedServerCandle\(roundId\)/);
+  assert.match(authority, /engine\.settle\(roundId, candle\.open, candle\.close, candle\.closeTime\)/);
+  assert.match(authority, /allOpenOrders\(\)/);
 });
 
 test("mobile competition combines player and bot open orders in tabs", async () => {

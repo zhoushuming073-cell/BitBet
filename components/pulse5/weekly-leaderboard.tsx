@@ -44,7 +44,7 @@ export function WeeklyLeaderboard({ playerEngine, bots }: { playerEngine: Pulse5
           <h2 id="weekly-board-title"><Trophy aria-hidden="true" /> 本周排行</h2>
           <p>{weekLabel} 起 · 每周一自动更新</p>
         </div>
-        <span className="board-count">3 位玩家</span>
+        <span className="board-count">4 位玩家</span>
       </div>
       <div className="board-list">
         {standings.map((row, index) => (
@@ -62,6 +62,7 @@ export function WeeklyLeaderboard({ playerEngine, bots }: { playerEngine: Pulse5
             </span>
             <span className="board-stats">
               胜率 {row.winRate.toFixed(0)}% · {row.orderCount}单 · 最长胜{row.maxWinStreak} / 败{row.maxLossStreak} · 回撤 {row.maxDrawdownPercent.toFixed(2)}% · SKIP {row.skipCount}
+              {row.id === "lambda" ? ` · ${row.participationRounds}轮 · ${row.averageOrdersPerRound.toFixed(1)}单/轮 · 均Edge ${(row.averageEdge * 100).toFixed(1)}% · 对冲${row.hedgeCount}` : ""}
             </span>
           </div>
         ))}

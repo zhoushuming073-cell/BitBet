@@ -1,34 +1,40 @@
-# BitBet 生产部署清单
+# BitBet · Sites 部署说明
 
-## 已完成的代码边界
+## 当前生产架构
 
-- 业务持久层已提供 CloudBase MySQL 8.0 适配器，连接使用 `CONNECTION_URI`，或 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME`。
-- `migrations/001_initial_schema.sql` 建立账号、钱包、轮次、订单、结算、流水、排行榜和同步队列表；`002_pending_claim_integrity.sql` 可重建待领取缓存。
-- 下单通过 `SELECT ... FOR UPDATE` 锁钱包，并在一个事务中完成订单唯一性检查、扣款、订单与流水。
-- 单笔领取和全部领取都在事务中锁定结算与钱包；重复请求不会重复入账。
-- `settlements` 是待领取事实来源，`wallets.pending_claim` 只是物化缓存，可检查并重建。
-- 正式账号 API 使用 `requireUser()`，业务接口不接受客户端 `userId`。
-- 生产下单不接受客户端 `midPrice`；本地回退必须同时满足非 production 和 `ALLOW_CLIENT_MARKET_PRICE_DEV=true`。
-- 生产缺少 MySQL、持久化游戏状态、服务端行情或网关鉴权时均 fail closed。
+- 站点：OpenAI Sites / Cloudflare Worker 运行时。
+- 身份：Sites 网关注入的 ChatGPT 用户 ID；客户端提交的 `userId` 不受信任。
+- 数据：D1 的 `game_actor_ledgers`、`lambda_configs`、`bot_scheduler_leases`。
+- 行情：服务端从 Binance 公共市场数据接口读取盘口、1 分钟/1 秒 K 线与官方 5 分钟结算 K 线。
+- 权威路径：玩家下单、Bot 决策、实际执行赔率、资金扣减、结算和领取都在服务端完成。
+- 并发：账本使用版本号进行乐观并发控制；调度器使用 D1 lease 避免重复执行。
 
-## 上线前仍必须完成
+## 迁移
 
-1. 在 CloudBase MySQL 8.0 执行两份迁移，并用专用低权限数据库账号配置云托管内网连接。
-2. 在 CloudBase 身份认证中开启邮箱注册、用户名密码登录和 SMTP 发码。
-3. 在 HTTP 网关为 `/api/account/*` 与 `/api/game/*` 开启身份认证；确认后端只能经该入口访问，再设置 `CLOUDBASE_HTTP_AUTH_VERIFIED=true`。
-4. 注入真实服务端 BTC 行情实现 `MarketPriceProvider`，并由可信服务端任务根据 Binance 5m 收盘触发结算。
-5. 注入 `GameStateStoreFactory` 的持久化实现（SQLite、Redis 等均可）；生产不允许默认内存实现。
-6. 使用 `MySqlSyncQueue` 或同等持久化实现运行同步 worker。
-7. 生成并安全保存 `INTERNAL_SETTLEMENT_SECRET`，只授予结算 worker。
-8. 运行真实 MySQL 集成测试、并发压测、网关鉴权测试后再部署。
+Drizzle schema 位于 `db/schema.ts`，生成迁移位于 `drizzle/`。Sites 发布时会将追加迁移应用到绑定名为 `DB` 的 D1 数据库。
 
-## 验证命令
+不要修改已经发布的 SQL 迁移；后续结构变化应继续生成新的递增迁移。
+
+## Bot 后台运行与补算
+
+Worker 导出 `scheduled` 入口，用于定时推进全部已建立账户的 Alpha、Beta、Lambda。每次用户打开页面也会推进自己的四人赛状态。
+
+为容忍调度或网络中断，服务端会从 Bot 最后评估时间开始，以历史 1 秒 K 线按 5 秒决策点回放最近最多 12 个缺失轮次。每次策略调用只能看到当前回放时点以前的样本；收盘价仅在该轮全部决策结束后用于结算。
+
+## 发布验证
 
 ```text
 npx tsc --noEmit
 npm run lint
-npm run build
-node --test --test-concurrency=1 tests/*.test.mjs
+npm test
 ```
 
-没有真实 `CONNECTION_URI` 时，测试只覆盖内存事务模型和 SQL 静态契约，不能声称已接通 CloudBase MySQL。
+发布后还应验证：
+
+1. 未登录访问写接口返回 401，并能通过 `/signin-with-chatgpt` 登录。
+2. `/api/game/state` 返回一个玩家和三个 Bot 的服务端快照。
+3. 下单响应包含服务端生成的订单与更新后账本，刷新或换浏览器后仍存在。
+4. Lambda 配置保存后跨浏览器一致，订单包含 `strategyMeta`。
+5. 结算只使用已经关闭的官方 5 分钟 K 线；重复结算和重复领取不会二次入账。
+
+旧 CloudBase/MySQL 代码仅作为历史兼容模块保留，不再承载首页的 BitBet 权威账本。

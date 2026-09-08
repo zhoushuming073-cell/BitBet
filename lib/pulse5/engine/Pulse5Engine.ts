@@ -15,6 +15,7 @@ import type {
   BettingState,
   CurrentPosition,
   MarketSnapshot,
+  LedgerSnapshot,
   Order,
   PricePointLike,
   ProbabilityBreakdown,
@@ -315,7 +316,14 @@ export class Pulse5Engine {
    * latency / an outdated preview quote can never block or mis-fill the order.
    * The resulting order is a pending ("挂单"/OPEN) position until settlement.
    */
-  placeOrder(side: Side, stakeRaw: number, idempotencyKey: string, now: number, reason?: string): Order {
+  placeOrder(
+    side: Side,
+    stakeRaw: number,
+    idempotencyKey: string,
+    now: number,
+    reason?: string,
+    strategyMeta?: Order["strategyMeta"],
+  ): Order {
     const snapshot = this.buildMarketSnapshot(now);
     const gateResult = this.gate(snapshot, now);
     const round = roundFor(now);
@@ -351,6 +359,7 @@ export class Pulse5Engine {
       now,
       gate: { canBet: gateResult.canBet, reason: gateResult.reason },
       reason,
+      strategyMeta,
     });
     this.ensureRoundRecord(
       round.id,
@@ -455,6 +464,13 @@ export class Pulse5Engine {
   private emit(): void {
     this.view = null;
     for (const listener of this.listeners) listener();
+  }
+
+  restoreLedger(snapshot: LedgerSnapshot): void {
+    if (this.ledger instanceof LedgerStore) {
+      this.ledger.restore(snapshot);
+      this.emit();
+    }
   }
 
   subscribe = (listener: Listener): (() => void) => {

@@ -1,9 +1,9 @@
 import type { BotPastResult } from "./BotStrategy";
 
-export type BotDisplayState = "HOT" | "NORMAL" | "CAUTIOUS" | "WAITING" | "COOLDOWN";
+export type BotDisplayState = "HOT" | "NORMAL" | "CAUTIOUS" | "WAITING" | "COOLDOWN" | "SCANNING" | "EDGE" | "DEFENSIVE";
 
 export function deriveBotDisplayState(
-  id: "alpha" | "beta",
+  id: "alpha" | "beta" | "lambda",
   recentResults: BotPastResult[],
   lastAction: string,
   coolingDown: boolean,
@@ -20,6 +20,12 @@ export function deriveBotDisplayState(
     if (wins >= 2) return "HOT";
     if (losses >= 2 || lastAction.includes("等待成交条件")) return "CAUTIOUS";
     return "NORMAL";
+  }
+
+  if (id === "lambda") {
+    if (lastAction.includes("Adaptive hedge")) return "DEFENSIVE";
+    if (/positive edge|momentum|slope|Breakout|Mean deviation/.test(lastAction)) return "EDGE";
+    return "SCANNING";
   }
 
   if (coolingDown || lastAction.includes("休息")) return "COOLDOWN";

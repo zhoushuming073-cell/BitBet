@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
-import { claimOrder } from "@/lib/game/server";
-import { authErrorResponse, requireUser } from "@/lib/auth/require-user";
+import { claimAuthorityOrder } from "@/lib/pulse5/server/ServerAuthority";
+import { requireSiteUser, siteAuthError } from "@/lib/auth/sites-user";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const identity = requireUser(request);
+    const identity = requireSiteUser(request);
     const body = (await request.json()) as { orderId?: string };
     if (!body.orderId) throw new Error("orderId 缺失");
-    const amount = await claimOrder(identity.userId, body.orderId);
-    return NextResponse.json({ claimed: amount });
+    const snapshot = await claimAuthorityOrder(identity.userId, body.orderId);
+    return NextResponse.json({ snapshot });
   } catch (error) {
-    return authErrorResponse(error);
+    return siteAuthError(error);
   }
 }

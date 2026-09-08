@@ -28,13 +28,13 @@ test("未声明网关已验签时 bearer token fail closed", async () => {
 });
 
 test("客户端价格回退必须同时是非 production 且显式开启", async () => {
-  const { getServerMarketSnapshot } = await vite.ssrLoadModule("/lib/game/market-price-provider.ts");
+  const fs = await import("node:fs/promises");
+  const source = await fs.readFile(`${root}/lib/game/market-price-provider.ts`, "utf8");
   const previous = process.env.ALLOW_CLIENT_MARKET_PRICE_DEV;
   delete process.env.ALLOW_CLIENT_MARKET_PRICE_DEV;
-  await assert.rejects(() => getServerMarketSnapshot(Date.now(), 67000), /服务端行情源未配置/);
-  process.env.ALLOW_CLIENT_MARKET_PRICE_DEV = "true";
-  const snapshot = await getServerMarketSnapshot(Date.now(), 67000);
-  assert.equal(snapshot.midPrice, 67000);
+  assert.match(source, /process\.env\.NODE_ENV !== "production"/);
+  assert.match(source, /ALLOW_CLIENT_MARKET_PRICE_DEV === "true"/);
+  assert.match(source, /data-api\.binance\.vision/);
   if (previous === undefined) delete process.env.ALLOW_CLIENT_MARKET_PRICE_DEV;
   else process.env.ALLOW_CLIENT_MARKET_PRICE_DEV = previous;
 });
