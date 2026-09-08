@@ -2,7 +2,8 @@ import { GAME_CONFIG } from "../game/gameConfig";
 import { roundFor } from "../game/RoundEngine";
 import type { Ticker24h } from "../engine/types";
 
-type RawOkxCandle = [string, string, string, string, string, string, string, string, string];
+type KrakenOhlcRow = [number, string, string, string, string, string, string, number];
+type KrakenTradeRow = [string, string, number, string, string, string, number?];
 
 export type RawKline = [number, string, string, string, string, string, number];
 
@@ -18,12 +19,13 @@ export interface AggTrade {
   T: number;
 }
 
-const REST_BASE = "https://www.okx.com/api/v5/market";
-const WS_ENDPOINT = "wss://ws.okx.com:8443/ws/v5/public";
-const INSTRUMENT = "BTC-USDT";
+const REST_BASE = "https://api.kraken.com/0/public";
+const WS_ENDPOINT = "wss://ws.kraken.com/v2";
+const REST_PAIR = "XBTUSDT";
+const WS_SYMBOL = "BTC/USDT";
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 8_000;
-const HEARTBEAT_TIMEOUT_MS = 10_000;
+const HEARTBEAT_TIMEOUT_MS = 35_000;
 
 export interface FeedHandlers {
   onBook: (bid: number, ask: number, ts: number) => void;
@@ -33,26 +35,33 @@ export interface FeedHandlers {
   onStatus: (connected: boolean) => void;
 }
 
-function parseRows(rows: RawOkxCandle[], intervalMs: number): RawKline[] {
+function pairValue<T>(result: object): T {
+  const record = result as Record<string, unknown>;
+  const key = Object.keys(record).find((name) => name !== "last");
+  if (!key) throw new Error("Kraken 行情返回无交易对");
+  return record[key] as T;
+}
+
+function parseRows(rows: KrakenOhlcRow[], intervalMs: number): RawKline[] {
   return rows
-    .map((row) => [Number(row[0]), row[1], row[2], row[3], row[4], row[5], Number(row[0]) + intervalMs - 1] as RawKline)
-    .filter((row) => Number.isFinite(row[0]) && Number(row[0]) > 0)
+    .map((row) => [row[0] * 1000, row[1], row[2], row[3], row[4], row[6], row[0] * 1000 + intervalMs - 1] as RawKline)
+    .filter((row) => Number.isFinite(row[0]) && row[0] > 0)
     .sort((a, b) => a[0] - b[0]);
 }
 
-async function okxJson<T>(path: string): Promise<T> {
+async function krakenJson<T>(path: string): Promise<T> {
   const response = await fetch(`${REST_BASE}${path}`, {
     cache: "no-store",
     headers: { Accept: "application/json" },
   });
-  if (!response.ok) throw new Error(`OKX 行情请求失败 ${response.status}`);
-  const payload = await response.json() as { code?: string; msg?: string; data?: T };
-  if (payload.code !== "0" || !payload.data) throw new Error(payload.msg || "OKX 行情返回无效");
-  return payload.data;
+  if (!response.ok) throw new Error(`BTC 行情请求失败 ${response.status}`);
+  const payload = await response.json() as { error?: string[]; result?: T };
+  if (payload.error?.length || !payload.result) throw new Error(payload.error?.join(", ") || "BTC 行情返回无效");
+  return payload.result;
 }
 
 /** Browser-only public BTC/USDT feed. Orders and settlement remain server-owned. */
-export class OkxFeedManager {
+export class KrakenFeedManager {
   private socket: WebSocket | null = null;
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -104,20 +113,16 @@ export class OkxFeedManager {
     this.armHeartbeat();
     socket.onopen = () => {
       this.reconnectAttempts = 0;
-      socket.send(JSON.stringify({
-        op: "subscribe",
-        args: [
-          { channel: "tickers", instId: INSTRUMENT },
-          { channel: "trades", instId: INSTRUMENT },
-          { channel: "candle5m", instId: INSTRUMENT },
-        ],
-      }));
+      for (const channel of ["ticker", "trade"] as const) {
+        socket.send(JSON.stringify({ method: "subscribe", params: { channel, symbol: [WS_SYMBOL], snapshot: true } }));
+      }
+      socket.send(JSON.stringify({ method: "subscribe", params: { channel: "ohlc", symbol: [WS_SYMBOL], interval: 5, snapshot: true } }));
       this.handlers.onStatus(true);
       this.armHeartbeat();
     };
     socket.onmessage = (event) => {
       this.armHeartbeat();
-      this.handleMessage(event.data);
+      this.handleMessage(String(event.data));
     };
     socket.onerror = () => socket.close();
     socket.onclose = () => {
@@ -137,32 +142,30 @@ export class OkxFeedManager {
   }
 
   private handleMessage(raw: string): void {
-    let message: { arg?: { channel?: string }; data?: Array<Record<string, unknown> | string[]> };
+    let message: { channel?: string; data?: Array<Record<string, unknown>> };
     try { message = JSON.parse(raw); } catch { return; }
-    const channel = message.arg?.channel;
     const rows = message.data ?? [];
     for (const value of rows) {
-      if (channel === "trades" && !Array.isArray(value)) {
-        const price = Number(value.px);
-        const ts = Number(value.ts) || Date.now();
-        if (price > 0) this.handlers.onTrade(price, ts);
+      if (message.channel === "trade") {
+        const price = Number(value.price);
+        const ts = Date.parse(String(value.timestamp));
+        if (price > 0 && Number.isFinite(ts)) this.handlers.onTrade(price, ts);
       }
-      if (channel === "tickers" && !Array.isArray(value)) {
+      if (message.channel === "ticker") {
         const price = Number(value.last);
-        const bid = Number(value.bidPx);
-        const ask = Number(value.askPx);
-        const open = Number(value.open24h);
-        const ts = Number(value.ts) || Date.now();
+        const bid = Number(value.bid);
+        const ask = Number(value.ask);
+        const ts = Date.now();
         if (bid > 0 && ask > 0) this.handlers.onBook(bid, ask, ts);
         if (price > 0) {
           this.handlers.onTrade(price, ts);
           this.handlers.onTicker({
             price,
-            change: open > 0 ? ((price - open) / open) * 100 : 0,
-            high: Number(value.high24h) || price,
-            low: Number(value.low24h) || price,
-            volume: Number(value.vol24h) || 0,
-            quoteVolume: Number(value.volCcy24h) || 0,
+            change: Number(value.change_pct) || 0,
+            high: Number(value.high) || price,
+            low: Number(value.low) || price,
+            volume: Number(value.volume) || 0,
+            quoteVolume: (Number(value.vwap) || price) * (Number(value.volume) || 0),
           }, ts);
           const roundId = roundFor(ts).id;
           if (roundId !== this.lastRoundId) {
@@ -171,37 +174,36 @@ export class OkxFeedManager {
           }
         }
       }
-      if (channel === "candle5m" && Array.isArray(value)) {
-        const row = value as string[];
-        const openTime = Number(row[0]);
+      if (message.channel === "ohlc") {
+        const openTime = Date.parse(String(value.interval_begin));
+        if (!Number.isFinite(openTime)) continue;
         this.lastRoundId = openTime;
-        this.handlers.onKline(openTime, Number(row[1]), Number(row[4]), row[8] === "1", Number(row[0]));
+        this.handlers.onKline(openTime, Number(value.open), Number(value.close), openTime + GAME_CONFIG.ROUND_DURATION_MS <= Date.now(), Date.now());
       }
     }
   }
 
   static async fetchKlines(interval: "1m" | "5m", limit: number, startTime?: number): Promise<RawKline[]> {
-    const bar = interval;
-    const intervalMs = interval === "1m" ? 60_000 : 300_000;
-    const bounded = Math.min(Math.max(limit, 1), 300);
-    const path = startTime === undefined
-      ? `/candles?instId=${INSTRUMENT}&bar=${bar}&limit=${bounded}`
-      : `/history-candles?instId=${INSTRUMENT}&bar=${bar}&after=${startTime + bounded * intervalMs}&before=${Math.max(0, startTime - 1)}&limit=${bounded}`;
-    const rows = await okxJson<RawOkxCandle[]>(path);
-    const parsed = parseRows(rows, intervalMs);
+    const intervalMinutes = interval === "1m" ? 1 : 5;
+    const intervalMs = intervalMinutes * 60_000;
+    const bounded = Math.min(Math.max(limit, 1), 720);
+    const since = Math.floor((startTime ?? Date.now() - (bounded + 2) * intervalMs) / 1000);
+    const result = await krakenJson<Record<string, KrakenOhlcRow[]> & { last?: string }>(`/OHLC?pair=${REST_PAIR}&interval=${intervalMinutes}&since=${since}`);
+    const parsed = parseRows(pairValue<KrakenOhlcRow[]>(result), intervalMs);
     return startTime === undefined ? parsed.slice(-bounded) : parsed.filter((row) => row[0] >= startTime).slice(0, bounded);
   }
 
   static async fetchAggTrades(startTime: number, endTime: number, limit = 500): Promise<AggTrade[]> {
-    const rows = await okxJson<Array<{ px: string; ts: string }>>(`/trades?instId=${INSTRUMENT}&limit=${Math.min(Math.max(limit, 1), 500)}`);
-    return rows
-      .map((row) => ({ p: row.px, T: Number(row.ts) }))
+    const result = await krakenJson<Record<string, KrakenTradeRow[]> & { last?: string }>(`/Trades?pair=${REST_PAIR}`);
+    return pairValue<KrakenTradeRow[]>(result)
+      .map((row) => ({ p: row[0], T: Math.round(row[2] * 1000) }))
       .filter((row) => row.T >= startTime && row.T <= endTime && Number(row.p) > 0)
+      .slice(-Math.min(Math.max(limit, 1), 1000))
       .sort((a, b) => a.T - b.T);
   }
 
   static async fetchClosedCandle(roundId: number, now: number): Promise<ClosedCandle | null> {
-    const rows = await this.fetchKlines("5m", 1, roundId);
+    const rows = await this.fetchKlines("5m", 2, roundId);
     const row = rows.find((item) => item[0] === roundId);
     if (!row) return null;
     const closedAt = roundId + GAME_CONFIG.ROUND_DURATION_MS;

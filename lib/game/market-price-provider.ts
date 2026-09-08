@@ -1,10 +1,15 @@
 import { roundFor } from "@/lib/pulse5/game/RoundEngine";
 
-const OKX_MARKET_API = "https://www.okx.com/api/v5/market";
-const INSTRUMENT = "BTC-USDT";
+const KRAKEN_MARKET_API = "https://api.kraken.com/0/public";
+const PAIR = "XBTUSDT";
 
-type OkxCandle = [string, string, string, string, string, string, string, string, string];
-type OkxTrade = { px: string; ts: string };
+type KrakenOhlcRow = [number, string, string, string, string, string, string, number];
+type KrakenTradeRow = [string, string, number, string, string, string, number?];
+type KrakenTicker = {
+  a: [string, string, string];
+  b: [string, string, string];
+  c: [string, string];
+};
 
 export interface ServerMarketSnapshot {
   midPrice: number;
@@ -26,20 +31,27 @@ export function configureMarketPriceProvider(next: MarketPriceProvider): void {
   provider = next;
 }
 
-async function okxQuery<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${OKX_MARKET_API}${path}`, {
-    signal,
-    cache: "no-store",
-    headers: { Accept: "application/json", "User-Agent": "BitBet-Market/1.0" },
-  });
-  if (!response.ok) throw new Error(`BTC 行情请求失败 ${response.status}`);
-  const payload = await response.json() as { code?: string; msg?: string; data?: T };
-  if (payload.code !== "0" || !payload.data) throw new Error(payload.msg || "BTC 行情返回无效");
-  return payload.data;
+function pairValue<T>(result: object): T {
+  const record = result as Record<string, unknown>;
+  const key = Object.keys(record).find((name) => name !== "last");
+  if (!key) throw new Error("BTC 行情返回无交易对");
+  return record[key] as T;
 }
 
-function ascendingCandles(rows: OkxCandle[]) {
-  return [...rows].sort((a, b) => Number(a[0]) - Number(b[0]));
+async function krakenQuery<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${KRAKEN_MARKET_API}${path}`, {
+    signal,
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`BTC 行情请求失败 ${response.status}`);
+  const payload = await response.json() as { error?: string[]; result?: T };
+  if (payload.error?.length || !payload.result) throw new Error(payload.error?.join(", ") || "BTC 行情返回无效");
+  return payload.result;
+}
+
+function ascendingCandles(rows: KrakenOhlcRow[]) {
+  return [...rows].sort((a, b) => a[0] - b[0]);
 }
 
 export async function getServerMarketSnapshot(now: number, devClientPrice?: number): Promise<ServerMarketSnapshot> {
@@ -61,35 +73,39 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
   }
 
   const round = roundFor(now);
+  const since = Math.floor((now - 82 * 60_000) / 1000);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
-    const [tickers, rawMinutes, rawTrades] = await Promise.all([
-      okxQuery<Array<{ bidPx: string; askPx: string; last: string; ts: string }>>(`/ticker?instId=${INSTRUMENT}`, controller.signal),
-      okxQuery<OkxCandle[]>(`/candles?instId=${INSTRUMENT}&bar=1m&limit=80`, controller.signal),
-      okxQuery<OkxTrade[]>(`/trades?instId=${INSTRUMENT}&limit=500`, controller.signal).catch(() => []),
+    const [tickerResult, minuteResult, tradeResult] = await Promise.all([
+      krakenQuery<Record<string, KrakenTicker>>(`/Ticker?pair=${PAIR}`, controller.signal),
+      krakenQuery<Record<string, KrakenOhlcRow[]> & { last?: string }>(`/OHLC?pair=${PAIR}&interval=1&since=${since}`, controller.signal),
+      krakenQuery<Record<string, KrakenTradeRow[]> & { last?: string }>(`/Trades?pair=${PAIR}`, controller.signal).catch(() => null),
     ]);
-    const ticker = tickers[0];
-    const minuteRows = ascendingCandles(rawMinutes);
-    const bid = Number(ticker?.bidPx);
-    const ask = Number(ticker?.askPx);
-    const lastPrice = Number(ticker?.last);
+    const ticker = pairValue<KrakenTicker>(tickerResult);
+    const minuteRows = ascendingCandles(pairValue<KrakenOhlcRow[]>(minuteResult));
+    const bid = Number(ticker?.b?.[0]);
+    const ask = Number(ticker?.a?.[0]);
+    const lastPrice = Number(ticker?.c?.[0]);
     const midPrice = bid > 0 && ask > 0 ? (bid + ask) / 2 : lastPrice;
-    const roundRow = minuteRows.find((row) => Number(row[0]) === round.id);
+    const roundRow = minuteRows.find((row) => row[0] * 1000 === round.id);
     const roundOpen = Number(roundRow?.[1] ?? midPrice);
     if (![bid, ask, midPrice, roundOpen].every((value) => Number.isFinite(value) && value > 0)) {
       throw new Error("BTC 行情字段无效");
     }
-    const priceSamples = rawTrades
-      .map((row) => ({ time: Number(row.ts), price: Number(row.px) }))
-      .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.price) && item.price > 0 && item.time <= now)
-      .sort((a, b) => a.time - b.time);
-    if (priceSamples.at(-1)?.time !== now) priceSamples.push({ time: now, price: midPrice });
+    const priceSamples = tradeResult
+      ? pairValue<KrakenTradeRow[]>(tradeResult)
+        .map((row) => ({ time: Math.round(row[2] * 1000), price: Number(row[0]) }))
+        .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.price) && item.price > 0 && item.time <= now)
+        .sort((a, b) => a.time - b.time)
+      : [];
+    const latestTradeAt = priceSamples.at(-1)?.time;
+    if (latestTradeAt !== now) priceSamples.push({ time: now, price: midPrice });
     return {
       midPrice,
       bid,
       ask,
-      observedAt: Math.min(now, Number(ticker.ts) || now),
+      observedAt: latestTradeAt ? Math.min(now, latestTradeAt) : now,
       roundOpen,
       volatilityCloses: minuteRows.map((row) => Number(row[4])).filter((value) => Number.isFinite(value) && value > 0),
       priceSamples,
@@ -100,10 +116,10 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
 }
 
 export async function getClosedServerCandle(roundId: number) {
-  const rows = await okxQuery<OkxCandle[]>(
-    `/history-candles?instId=${INSTRUMENT}&bar=5m&after=${roundId + 5 * 60 * 1000}&before=${Math.max(0, roundId - 1)}&limit=2`,
+  const result = await krakenQuery<Record<string, KrakenOhlcRow[]> & { last?: string }>(
+    `/OHLC?pair=${PAIR}&interval=5&since=${Math.floor(roundId / 1000)}`,
   );
-  const row = rows.find((item) => Number(item[0]) === roundId);
+  const row = pairValue<KrakenOhlcRow[]>(result).find((item) => item[0] * 1000 === roundId);
   if (!row || roundId + 5 * 60 * 1000 > Date.now()) return null;
   return { open: Number(row[1]), close: Number(row[4]), closeTime: roundId + 5 * 60 * 1000 - 1 };
 }
@@ -111,16 +127,16 @@ export async function getClosedServerCandle(roundId: number) {
 /** Historical replay uses only candle values that were visible at each minute close. */
 export async function getHistoricalRoundMarket(roundId: number) {
   const round = roundFor(roundId);
-  const rows = ascendingCandles(await okxQuery<OkxCandle[]>(
-    `/history-candles?instId=${INSTRUMENT}&bar=1m&after=${round.end}&before=${Math.max(0, round.start - 1)}&limit=6`,
-  )).filter((row) => Number(row[0]) >= round.start && Number(row[0]) < round.end);
+  const result = await krakenQuery<Record<string, KrakenOhlcRow[]> & { last?: string }>(
+    `/OHLC?pair=${PAIR}&interval=1&since=${Math.floor(round.start / 1000)}`,
+  );
+  const rows = ascendingCandles(pairValue<KrakenOhlcRow[]>(result))
+    .filter((row) => row[0] * 1000 >= round.start && row[0] * 1000 < round.end);
   if (!rows.length) return null;
 
-  // A minute candle is not exposed before it closes. Repeating its close after
-  // that timestamp creates a step series without inventing intraminute prices.
   const samples: Array<{ time: number; price: number }> = [];
   for (const row of rows) {
-    const visibleAt = Number(row[0]) + 60_000;
+    const visibleAt = row[0] * 1000 + 60_000;
     const price = Number(row[4]);
     for (let time = visibleAt; time < Math.min(visibleAt + 60_000, round.end); time += 5_000) {
       samples.push({ time, price });

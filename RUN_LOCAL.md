@@ -1,6 +1,6 @@
 # BitBet 本地运行
 
-行情通过网络连接 OKX BTC/USDT 公共接口；本地预览使用开发账户，线上账户、下注、余额和战绩由 Sites 服务端保存，不会产生真实交易所订单。
+行情通过网络连接 Kraken BTC/USDT 公共接口；本地预览使用开发账户，线上账户、下注、余额和战绩由 Sites 服务端保存，不会产生真实交易所订单。
 
 ## Windows 一键启动
 
@@ -25,5 +25,5 @@ npm run dev
 ## 网络说明
 
 - 必须联网才能获取 BTC 实时价格。
-- 网络需要能够访问 OKX 公共 REST 与 WebSocket 行情接口。
+- 网络需要能够访问 Kraken 公共 REST 与 WebSocket 行情接口。
 - 虚拟余额和记录保存在浏览器 `localStorage`，清理浏览器网站数据后会重置。

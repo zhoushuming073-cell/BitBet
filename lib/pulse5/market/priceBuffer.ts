@@ -1,5 +1,5 @@
 import type { PricePointLike } from "../engine/types";
-import type { AggTrade } from "./OkxFeedManager";
+import type { AggTrade } from "./KrakenFeedManager";
 
 /**
  * Rolling price-buffer utilities. One unified buffer feeds the chart: initial
