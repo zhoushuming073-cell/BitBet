@@ -4,7 +4,6 @@ const KRAKEN_MARKET_API = "https://api.kraken.com/0/public";
 const PAIR = "XBTUSDT";
 
 type KrakenOhlcRow = [number, string, string, string, string, string, string, number];
-type KrakenTradeRow = [string, string, number, string, string, string, number?];
 type KrakenTicker = {
   a: [string, string, string];
   b: [string, string, string];
@@ -26,12 +25,14 @@ export interface MarketPriceProvider {
 }
 
 let provider: MarketPriceProvider | null = null;
-const SNAPSHOT_FRESH_MS = 1_500;
-const SNAPSHOT_STALE_FALLBACK_MS = 30_000;
+const SNAPSHOT_FRESH_MS = 4_000;
+const SNAPSHOT_STALE_FALLBACK_MS = 5 * 60_000;
 let cachedSnapshot: { value: ServerMarketSnapshot; fetchedAt: number } | null = null;
 let snapshotInFlight: Promise<ServerMarketSnapshot> | null = null;
+let snapshotRetryAfter = 0;
 const ohlcCaches = new Map<number, { sinceMs: number; fetchedAt: number; rows: KrakenOhlcRow[] }>();
 const ohlcInFlight = new Map<number, { sinceMs: number; request: Promise<KrakenOhlcRow[]> }>();
+let livePriceSamples: Array<{ time: number; price: number }> = [];
 
 export function configureMarketPriceProvider(next: MarketPriceProvider): void {
   provider = next;
@@ -102,6 +103,10 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
 
   const wallNow = Date.now();
   if (cachedSnapshot && wallNow - cachedSnapshot.fetchedAt <= SNAPSHOT_FRESH_MS) return cachedSnapshot.value;
+  if (wallNow < snapshotRetryAfter) {
+    if (cachedSnapshot && wallNow - cachedSnapshot.fetchedAt <= SNAPSHOT_STALE_FALLBACK_MS) return cachedSnapshot.value;
+    throw new Error("BTC 行情暂时限流，等待重试");
+  }
   if (snapshotInFlight) {
     try { return await snapshotInFlight; }
     catch (error) {
@@ -116,13 +121,11 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8_000);
     try {
-      const [tickerResult, minuteResult, tradeResult] = await Promise.all([
+      const [tickerResult, minuteRows] = await Promise.all([
         krakenQuery<Record<string, KrakenTicker>>(`/Ticker?pair=${PAIR}`, controller.signal),
-        krakenQuery<Record<string, KrakenOhlcRow[]> & { last?: string }>(`/OHLC?pair=${PAIR}&interval=1&since=${since}`, controller.signal),
-        krakenQuery<Record<string, KrakenTradeRow[]> & { last?: string }>(`/Trades?pair=${PAIR}`, controller.signal).catch(() => null),
+        getCachedOhlc(1, since * 1000),
       ]);
       const ticker = pairValue<KrakenTicker>(tickerResult);
-      const minuteRows = ascendingCandles(pairValue<KrakenOhlcRow[]>(minuteResult));
       const bid = Number(ticker?.b?.[0]);
       const ask = Number(ticker?.a?.[0]);
       const lastPrice = Number(ticker?.c?.[0]);
@@ -132,19 +135,19 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
       if (![bid, ask, midPrice, roundOpen].every((value) => Number.isFinite(value) && value > 0)) {
         throw new Error("BTC 行情字段无效");
       }
-      const priceSamples = tradeResult
-        ? pairValue<KrakenTradeRow[]>(tradeResult)
-          .map((row) => ({ time: Math.round(row[2] * 1000), price: Number(row[0]) }))
-          .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.price) && item.price > 0 && item.time <= now)
-          .sort((a, b) => a.time - b.time)
-        : [];
-      const latestTradeAt = priceSamples.at(-1)?.time;
-      if (latestTradeAt !== now) priceSamples.push({ time: now, price: midPrice });
+      livePriceSamples.push({ time: now, price: midPrice });
+      livePriceSamples = livePriceSamples.filter((sample) => sample.time >= now - 90_000 && sample.time <= now);
+      const minuteSamples = minuteRows
+        .map((row) => ({ time: row[0] * 1000 + 60_000, price: Number(row[4]) }))
+        .filter((sample) => sample.time >= now - 90_000 && sample.time <= now && Number.isFinite(sample.price) && sample.price > 0);
+      const priceSamples = [...minuteSamples, ...livePriceSamples]
+        .sort((a, b) => a.time - b.time)
+        .filter((sample, index, all) => index === 0 || sample.time !== all[index - 1].time);
       return {
         midPrice,
         bid,
         ask,
-        observedAt: latestTradeAt ? Math.min(now, latestTradeAt) : now,
+        observedAt: now,
         roundOpen,
         volatilityCloses: minuteRows.map((row) => Number(row[4])).filter((value) => Number.isFinite(value) && value > 0),
         priceSamples,
@@ -157,8 +160,10 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
   try {
     const value = await request;
     cachedSnapshot = { value, fetchedAt: Date.now() };
+    snapshotRetryAfter = 0;
     return value;
   } catch (error) {
+    snapshotRetryAfter = Date.now() + 15_000;
     if (cachedSnapshot && Date.now() - cachedSnapshot.fetchedAt <= SNAPSHOT_STALE_FALLBACK_MS) return cachedSnapshot.value;
     throw error;
   } finally {

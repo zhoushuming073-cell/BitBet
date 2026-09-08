@@ -50,7 +50,14 @@ async function settleDue(engine: Pulse5Engine, now: number, autoClaim: boolean) 
   const settledRoundIds: number[] = [];
   for (const roundId of due.slice(-24)) {
     if (engine.ledger.isSettled(roundId)) continue;
-    const candle = await getClosedServerCandle(roundId);
+    let candle = null;
+    try {
+      candle = await getClosedServerCandle(roundId);
+    } catch {
+      // A transient exchange rate limit must not fail the whole online tick.
+      // Keep the order OPEN and retry the same official candle on a later tick.
+      continue;
+    }
     if (candle) {
       engine.settle(roundId, candle.open, candle.close, candle.closeTime);
       settledRoundIds.push(roundId);
@@ -204,7 +211,7 @@ async function competitionPayload(
   repo: ActorLedgerRepository,
   userId: string,
   records: [ActorLedgerRecord, ActorLedgerRecord, ActorLedgerRecord, ActorLedgerRecord],
-  market: ServerMarketSnapshot,
+  market: ServerMarketSnapshot | null,
   now: number,
 ) {
   const [player, alpha, beta, lambda] = records;
@@ -246,7 +253,7 @@ async function competitionPayload(
       expInLevel: learning.exp % 100,
       expToNextLevel: 100,
     },
-    market: { ...market },
+    market: market ? { ...market } : null,
     round: { id: round.id, start: round.start, lockTime: round.lockTime, end: round.end },
     serverTime: now,
   };
@@ -270,9 +277,21 @@ export async function getAuthorityCompetition(userId: string, displayName = "你
 export async function tickAuthorityCompetition(userId: string, displayName = "你", db: D1Like | null = getRuntimeDb(), devMarketPrice?: number) {
   const now = Date.now();
   const repo = new ActorLedgerRepository(db);
-  const market = await getServerMarketSnapshot(now, devMarketPrice);
-  const hasLease = await repo.acquireLease(`online-tick:${userId}`, 1_400);
-  const records = hasLease
+  // Acquire the shared lease before touching the exchange. Multiple tabs for the
+  // same player otherwise multiplied Kraken requests even though only one tick
+  // was allowed to mutate the ledgers.
+  const hasLease = await repo.acquireLease(`online-tick:${userId}`, 4_000);
+  let market: ServerMarketSnapshot | null = null;
+  if (hasLease) {
+    try {
+      market = await getServerMarketSnapshot(now, devMarketPrice);
+    } catch {
+      // The browser has its independent read-only display feed. Return the last
+      // authoritative ledgers with HTTP 200 and retry market/settlement shortly.
+      // Order submission still requires a fresh valid server market snapshot.
+    }
+  }
+  const records: ActorLedgerRecord[] = market
     ? await Promise.all([
       advancePlayer(repo, userId, displayName, market, now),
       advanceActor(repo, userId, "alpha", market, now),

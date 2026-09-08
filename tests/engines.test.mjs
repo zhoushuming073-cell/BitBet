@@ -345,3 +345,20 @@ test("settle exposes lastSettlement summary and a repeat settle does not overwri
   assert.equal(again.alreadySettled, true);
   assert.equal(e.getView(end + 3).lastSettlement.settledAt, end);
 });
+
+test("authoritative ledger restore announces a newly settled winning round", () => {
+  const { e, now } = warmedEngine({ mid: OPEN });
+  buy(e, "up", 100, now, "server-restore-settlement");
+
+  const server = new Pulse5Engine(new LedgerStore.LedgerStore(null, e.ledger.snapshot()));
+  const end = R + CFG.ROUND_DURATION_MS;
+  server.settle(R, OPEN, OPEN + 50, end);
+
+  e.restoreLedger(server.ledger.snapshot(), { announceNewSettlement: true });
+  const notice = e.getView(end + 1).lastSettlement;
+  assert.ok(notice);
+  assert.equal(notice.roundId, R);
+  assert.equal(notice.winningSide, "UP");
+  assert.equal(notice.grossPayout, server.ledger.orders[0].payout);
+  assert.equal(e.getView(end + 1).claimable, server.ledger.orders[0].payout);
+});

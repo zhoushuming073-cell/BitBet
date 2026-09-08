@@ -466,9 +466,48 @@ export class Pulse5Engine {
     for (const listener of this.listeners) listener();
   }
 
-  restoreLedger(snapshot: LedgerSnapshot): void {
+  restoreLedger(snapshot: LedgerSnapshot, options: { announceNewSettlement?: boolean } = {}): void {
     if (this.ledger instanceof LedgerStore) {
+      const previousStatus = options.announceNewSettlement
+        ? new Map(this.ledger.orders.map((order) => [order.id, order.status]))
+        : null;
       this.ledger.restore(snapshot);
+      if (previousStatus) {
+        const newlySettled = this.ledger.orders.filter((order) =>
+          order.status !== "OPEN" && previousStatus.get(order.id) === "OPEN",
+        );
+        if (newlySettled.length > 0) {
+          const newest = newlySettled.reduce((latest, order) =>
+            (order.settledAt ?? 0) > (latest.settledAt ?? 0) ? order : latest,
+          );
+          const roundOrders = this.ledger.orders.filter((order) =>
+            order.roundId === newest.roundId && order.status !== "OPEN",
+          );
+          const round = this.ledger.getRound(newest.roundId);
+          const winningSide = round?.result
+            ?? (roundOrders.some((order) => order.status === "VOID")
+              ? "DRAW"
+              : roundOrders.find((order) => order.status === "WON")?.side.toUpperCase() as RoundResult | undefined)
+            ?? null;
+          if (winningSide) {
+            const upStake = money(roundOrders.filter((order) => order.side === "up").reduce((sum, order) => sum + order.stake, 0));
+            const downStake = money(roundOrders.filter((order) => order.side === "down").reduce((sum, order) => sum + order.stake, 0));
+            const grossPayout = money(roundOrders.reduce((sum, order) => sum + order.payout, 0));
+            const totalInvested = money(upStake + downStake);
+            this.lastSettlement = {
+              roundId: newest.roundId,
+              totalInvested,
+              upStake,
+              downStake,
+              winningSide,
+              grossPayout,
+              roundPnL: money(grossPayout - totalInvested),
+              orderCount: roundOrders.length,
+              settledAt: newest.settledAt ?? round?.settledAt ?? Date.now(),
+            };
+          }
+        }
+      }
       this.emit();
     }
   }

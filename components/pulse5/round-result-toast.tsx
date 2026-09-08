@@ -27,13 +27,18 @@ export function RoundResultToast({
   onClaim,
 }: {
   notice: SettlementNotice | null;
-  onClaim?: () => void;
+  onClaim?: () => void | boolean | Promise<void | boolean>;
 }) {
   // Only the auto-hide marker lives in state; the notice itself is rendered
   // straight from props, so no synchronous setState happens inside the effect.
   const [hiddenRound, setHiddenRound] = useState<number | null>(null);
+  const [claimStatus, setClaimStatus] = useState<{
+    roundId: number | null;
+    state: "idle" | "claiming" | "failed";
+  }>({ roundId: null, state: "idle" });
   const timer = useRef<number | undefined>(undefined);
   const roundId = notice?.roundId ?? null;
+  const claimState = claimStatus.roundId === roundId ? claimStatus.state : "idle";
 
   useEffect(() => {
     if (roundId == null) return;
@@ -71,13 +76,23 @@ export function RoundResultToast({
           <button
             type="button"
             className="rt-claim"
-            onClick={() => {
-              onClaim();
-              setHiddenRound(notice.roundId);
+            disabled={claimState === "claiming"}
+            onClick={async () => {
+              setClaimStatus({ roundId: notice.roundId, state: "claiming" });
+              try {
+                const claimed = await onClaim();
+                if (claimed === false) {
+                  setClaimStatus({ roundId: notice.roundId, state: "failed" });
+                  return;
+                }
+                setHiddenRound(notice.roundId);
+              } catch {
+                setClaimStatus({ roundId: notice.roundId, state: "failed" });
+              }
             }}
           >
             <Gift aria-hidden="true" />
-            立即领取
+            {claimState === "claiming" ? "领取中…" : claimState === "failed" ? "领取失败，请重试" : "立即领取"}
           </button>
         ) : null}
       </div>

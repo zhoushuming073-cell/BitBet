@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Bitcoin, Bot, Settings2, ShieldCheck, Wifi, WifiOff } from "lucide-react";
 import { createBrowserEngine, type BrowserRuntime } from "@/lib/pulse5/engine/createBrowserEngine";
 import type { EngineView } from "@/lib/pulse5/engine/Pulse5Engine";
@@ -48,9 +48,11 @@ export function MarketGame() {
   const [authorityReady, setAuthorityReady] = useState(false);
   const [authRequired, setAuthRequired] = useState(false);
   const [syncError, setSyncError] = useState("");
+  const hasAuthoritySnapshot = useRef(false);
   const bots = useTradingBots(view, authorityBots);
 
   useEffect(() => {
+    hasAuthoritySnapshot.current = false;
     const nextRuntime = createBrowserEngine({ persist: false, settlement: false });
     const update = () => setView(nextRuntime.engine.getView(Date.now()));
     const unsubscribe = nextRuntime.engine.subscribe(update);
@@ -70,7 +72,8 @@ export function MarketGame() {
     if (!runtime) return;
     try {
       const state = advance ? await tickAuthorityState(signal) : await fetchAuthorityState(signal);
-      runtime.engine.restoreLedger(state.player);
+      runtime.engine.restoreLedger(state.player, { announceNewSettlement: hasAuthoritySnapshot.current });
+      hasAuthoritySnapshot.current = true;
       setAuthorityBots(state.bots);
       setLambdaConfig(state.lambdaConfig);
       setLambdaLearning(state.lambdaLearning);
@@ -116,9 +119,10 @@ export function MarketGame() {
   };
 
   const claimAll = async () => {
-    if (!runtime) return;
+    if (!runtime) return false;
     const result = await claimAuthorityAll();
     runtime.engine.restoreLedger(result.snapshot);
+    return true;
   };
 
   const handleLambdaSave = async (config: LambdaConfig) => {

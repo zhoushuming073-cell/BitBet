@@ -113,6 +113,15 @@ test("bot-only rounds use an official closed candle for settlement", async () =>
   assert.match(authority, /getClosedServerCandle\(roundId\)/);
   assert.match(authority, /engine\.settle\(roundId, candle\.open, candle\.close, candle\.closeTime\)/);
   assert.match(authority, /allOpenOrders\(\)/);
+  assert.match(authority, /Keep the order OPEN and retry/);
+});
+
+test("online tick rate limits exchange reads before advancing ledgers", async () => {
+  const fs = await import("node:fs/promises");
+  const authority = await fs.readFile(`${root}/lib/pulse5/server/ServerAuthority.ts`, "utf8");
+  const tickBody = authority.slice(authority.indexOf("export async function tickAuthorityCompetition"));
+  assert.ok(tickBody.indexOf("acquireLease") < tickBody.indexOf("getServerMarketSnapshot"));
+  assert.match(tickBody, /Return the last[\s\S]*HTTP 200/);
 });
 
 test("mobile competition combines player and bot open orders in tabs", async () => {
