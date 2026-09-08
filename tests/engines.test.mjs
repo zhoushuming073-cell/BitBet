@@ -14,7 +14,7 @@ const vite = await createServer({
 
 const mod = (p) => vite.ssrLoadModule(p);
 let CFG, RoundEngine, FairProb, Volatility, PriceImpact, MarketMaker,
-  LedgerStore, Position, Settlement, Pulse5Engine, ErrorCode, quickAmountsFor;
+  LedgerStore, Position, Settlement, Pulse5Engine, ErrorCode, quickAmountsFor, availableQuickAmountsFor;
 
 before(async () => {
   CFG = (await mod("/lib/pulse5/game/gameConfig.ts")).GAME_CONFIG;
@@ -26,13 +26,19 @@ before(async () => {
   LedgerStore = await mod("/lib/pulse5/orders/LedgerStore.ts");
   Position = await mod("/lib/pulse5/orders/PositionService.ts");
   Settlement = await mod("/lib/pulse5/settlement/SettlementService.ts");
-  quickAmountsFor = (await mod("/lib/pulse5/game/quickAmounts.ts")).quickAmountsFor;
+  ({ quickAmountsFor, availableQuickAmountsFor } = await mod("/lib/pulse5/game/quickAmounts.ts"));
   Pulse5Engine = (await mod("/lib/pulse5/engine/Pulse5Engine.ts")).Pulse5Engine;
   ErrorCode = (await mod("/lib/pulse5/engine/errors.ts")).ErrorCode;
 });
 
 test("2000 USDT round-start balance yields 200 / 500 / 1000 shortcuts", () => {
   assert.deepEqual(quickAmountsFor(2000), [200, 500, 1000]);
+});
+
+test("quick buttons never emit zero or duplicate capped amounts", () => {
+  assert.deepEqual(quickAmountsFor(0), []);
+  assert.deepEqual(availableQuickAmountsFor(2000, 0), []);
+  assert.deepEqual(availableQuickAmountsFor(2000, 80), [80]);
 });
 
 after(async () => {
@@ -198,6 +204,13 @@ test("order locks the latest-market odds/entry at order time, not an old quote",
   assert.equal(second.priceAtEntry, moved);
   // The first order keeps its independently locked odds.
   assert.notEqual(second.lockedOdds, first.lockedOdds);
+});
+
+test("bot order reason is stored on the real order record", () => {
+  const { e, now } = warmedEngine();
+  const placed = e.placeOrder("up", 100, "bot-reason", now, "短线动量增强");
+  assert.equal(placed.reason, "短线动量增强");
+  assert.equal(e.ledger.orders[0].reason, "短线动量增强");
 });
 
 // ---- 33. idempotency prevents double spend on duplicate submit ----

@@ -5,6 +5,7 @@ import { createBrowserEngine, type BrowserRuntime } from "@/lib/pulse5/engine/cr
 import type { EngineView } from "@/lib/pulse5/engine/Pulse5Engine";
 import type { Order } from "@/lib/pulse5/engine/types";
 import { BOT_DEFINITIONS, type BotDecisionContext } from "@/lib/pulse5/bots";
+import { deriveBotDisplayState, type BotDisplayState } from "@/lib/pulse5/bots/BotDisplayState";
 import { BinanceFeedManager } from "@/lib/pulse5/market/BinanceFeedManager";
 
 type BotDefinition = (typeof BOT_DEFINITIONS)[number];
@@ -14,6 +15,13 @@ export interface TradingBotState {
   engine: BrowserRuntime["engine"];
   view: EngineView;
   lastAction: string;
+  status: BotDisplayState;
+  skippedRoundIds: number[];
+}
+
+interface BotActivity {
+  observedRoundId: number | null;
+  skippedRoundIds: Set<number>;
 }
 
 interface BotRuntime {
@@ -22,6 +30,41 @@ interface BotRuntime {
   orderSequence: number;
   lastOrderAtByRound: Map<number, number>;
   lastAction: string;
+  coolingDown: boolean;
+  activity: BotActivity;
+}
+
+const ACTIVITY_SUFFIX = "-activity-v1";
+
+function loadActivity(storageKey: string): BotActivity {
+  try {
+    const raw = window.localStorage.getItem(`${storageKey}${ACTIVITY_SUFFIX}`);
+    const parsed = raw ? JSON.parse(raw) as { observedRoundId?: unknown; skippedRoundIds?: unknown } : null;
+    return {
+      observedRoundId: typeof parsed?.observedRoundId === "number" ? parsed.observedRoundId : null,
+      skippedRoundIds: new Set(
+        Array.isArray(parsed?.skippedRoundIds)
+          ? parsed.skippedRoundIds.filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+          : [],
+      ),
+    };
+  } catch {
+    return { observedRoundId: null, skippedRoundIds: new Set<number>() };
+  }
+}
+
+function persistActivity(bot: BotRuntime) {
+  try {
+    const cutoff = Date.now() - 8 * 7 * 24 * 60 * 60 * 1000;
+    const skippedRoundIds = [...bot.activity.skippedRoundIds].filter((roundId) => roundId >= cutoff);
+    bot.activity.skippedRoundIds = new Set(skippedRoundIds);
+    window.localStorage.setItem(`${bot.definition.storageKey}${ACTIVITY_SUFFIX}`, JSON.stringify({
+      observedRoundId: bot.activity.observedRoundId,
+      skippedRoundIds,
+    }));
+  } catch {
+    // Bot status metadata must never interrupt trading.
+  }
 }
 
 function pastResults(orders: Order[], currentRoundId: number) {
@@ -86,13 +129,18 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
   }, [marketView]);
 
   useEffect(() => {
-    const runtimes: BotRuntime[] = BOT_DEFINITIONS.map((definition) => ({
-      definition,
-      runtime: createBrowserEngine({ storageKey: definition.storageKey, passive: true }),
-      orderSequence: 0,
-      lastOrderAtByRound: new Map<number, number>(),
-      lastAction: "观察中",
-    }));
+    const runtimes: BotRuntime[] = BOT_DEFINITIONS.map((definition) => {
+      const activity = loadActivity(definition.storageKey);
+      return {
+        definition,
+        runtime: createBrowserEngine({ storageKey: definition.storageKey, passive: true }),
+        orderSequence: 0,
+        lastOrderAtByRound: new Map<number, number>(),
+        lastAction: "观察中",
+        coolingDown: false,
+        activity,
+      };
+    });
     const settlingRounds = new Set<number>();
 
     const settleBotRound = async (roundId: number) => {
@@ -125,6 +173,18 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
       for (const bot of runtimes) {
         if (shared?.market) {
           const market = shared.market;
+          if (bot.activity.observedRoundId !== shared.round.id) {
+            const previous = bot.activity.observedRoundId;
+            if (
+              previous != null
+              && previous < shared.round.id
+              && !bot.runtime.engine.ledger.orders.some((order) => order.roundId === previous)
+            ) {
+              bot.activity.skippedRoundIds.add(previous);
+            }
+            bot.activity.observedRoundId = shared.round.id;
+            persistActivity(bot);
+          }
           bot.runtime.engine.setConnected(shared.connected);
           if (!market.openPending) bot.runtime.engine.setRoundOpen(shared.round.id, market.roundOpen);
           bot.runtime.engine.onBookTicker(market.bestBid, market.bestAsk, market.marketTimestamp);
@@ -159,6 +219,7 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
           latestPersistedOrder?.createdAt ?? -Infinity,
         );
         const coolingDown = now - lastOrderAt < bot.definition.orderCooldownMs;
+        bot.coolingDown = coolingDown;
         if (!coolingDown) {
           const context = shared ? legalContext(bot, view, shared, now) : null;
           const decision = context ? bot.definition.strategy.decide(context) : null;
@@ -170,10 +231,11 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
                 decision.stake,
                 `bot-${bot.definition.id}-${roundId}-${now}-${bot.orderSequence}`,
                 now,
+                decision.reason,
               );
               bot.lastOrderAtByRound.set(roundId, now);
               const count = bot.runtime.engine.ledger.openOrdersForRound(roundId).length;
-              bot.lastAction = `第 ${count} 单 ${decision.action === "UP" ? "看涨" : "看跌"} ${decision.stake} USDT`;
+              bot.lastAction = `${decision.reason} · 第${count}单`;
             } catch {
               // The same execution gate as the player is authoritative. Keep
               // retrying during the legal window, but make the state visible.
@@ -185,12 +247,18 @@ export function useTradingBots(marketView: EngineView | null): TradingBotState[]
         }
       }
 
-      setBots(runtimes.map((bot) => ({
-        definition: bot.definition,
-        engine: bot.runtime.engine,
-        view: bot.runtime.engine.getView(now),
-        lastAction: bot.lastAction,
-      })));
+      setBots(runtimes.map((bot) => {
+        const view = bot.runtime.engine.getView(now);
+        const recentResults = pastResults(bot.runtime.engine.ledger.orders, view.round.id);
+        return {
+          definition: bot.definition,
+          engine: bot.runtime.engine,
+          view,
+          lastAction: bot.lastAction,
+          status: deriveBotDisplayState(bot.definition.id, recentResults, bot.lastAction, bot.coolingDown),
+          skippedRoundIds: [...bot.activity.skippedRoundIds],
+        };
+      }));
     };
 
     update();

@@ -13,6 +13,7 @@ import { RoundResultToast } from "./round-result-toast";
 import { useTradingBots } from "./use-trading-bots";
 import { WeeklyLeaderboard } from "./weekly-leaderboard";
 import { MobileCompetitionTabs } from "./mobile-competition-tabs";
+import { CompetitionNotice } from "./competition-notice";
 
 const money = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
@@ -95,6 +96,7 @@ export function MarketGame() {
   return (
     <main className="app-shell">
       <RoundResultToast notice={view.lastSettlement} onClaim={claimAll} />
+      <CompetitionNotice playerEngine={runtime.engine} bots={bots} />
 
       <header className="topbar">
         <div className="brand">

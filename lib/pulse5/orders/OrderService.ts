@@ -17,6 +17,7 @@ export interface PlaceOrderInput {
    */
   quote: Quote;
   idempotencyKey: string;
+  reason?: string;
   currentRoundId: number;
   now: number;
   gate: BettingGate;
@@ -38,7 +39,7 @@ export class OrderService {
   private lastOrderAt = -Infinity;
 
   placeOrder(input: PlaceOrderInput): Order {
-    const { ledger, quote, now, currentRoundId, gate, idempotencyKey } = input;
+    const { ledger, quote, now, currentRoundId, gate, idempotencyKey, reason } = input;
 
     // 1) Market / round gate is computed authoritatively at order time.
     if (!gate.canBet) {
@@ -82,6 +83,7 @@ export class OrderService {
       priceImpactPercent: quote.priceImpactPercent,
       quoteId: quote.quoteId,
       idempotencyKey,
+      reason,
       status: "OPEN",
       payout: 0,
       profit: 0,

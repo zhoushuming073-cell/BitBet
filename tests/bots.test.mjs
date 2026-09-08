@@ -37,6 +37,7 @@ test("Bot Alpha follows an observable short-term trend with bounded risk", async
   assert.equal(decision.action, "UP");
   assert.ok(decision.stake >= 300 && decision.stake <= 700);
   assert.ok(decision.confidence >= 0 && decision.confidence <= 1);
+  assert.ok(["短线动量增强", "趋势仍然有效"].includes(decision.reason));
 });
 
 test("Bot Beta fades a visible spike only after momentum slows", async () => {
@@ -53,6 +54,17 @@ test("Bot Beta fades a visible spike only after momentum slows", async () => {
   }
   assert.equal(decision.action, "DOWN");
   assert.ok(decision.stake >= 200 && decision.stake <= 500);
+  assert.ok(["价格偏离均值", "动量开始衰减"].includes(decision.reason));
+});
+
+test("bot display states use only recent outcomes and current legal state", async () => {
+  const { deriveBotDisplayState } = await vite.ssrLoadModule("/lib/pulse5/bots/BotDisplayState.ts");
+  const wins = [{ roundId: 2, profit: 10, settledAt: 2 }, { roundId: 1, profit: 8, settledAt: 1 }];
+  const losses = [{ roundId: 2, profit: -10, settledAt: 2 }, { roundId: 1, profit: -8, settledAt: 1 }];
+  assert.equal(deriveBotDisplayState("alpha", wins, "趋势仍然有效", false), "HOT");
+  assert.equal(deriveBotDisplayState("alpha", losses, "等待趋势形成", false), "CAUTIOUS");
+  assert.equal(deriveBotDisplayState("beta", [], "继续等待偏离扩大", false), "WAITING");
+  assert.equal(deriveBotDisplayState("beta", [], "动量开始衰减", true), "COOLDOWN");
 });
 
 test("Bot strategy context has no future close or current settlement result", async () => {
@@ -108,4 +120,14 @@ test("mobile competition combines player and bot open orders in tabs", async () 
   assert.match(tabs, /实时交易单/);
   assert.match(tabs, /最近结果/);
   assert.match(tabs, /本周排行/);
+  assert.match(tabs, /order\.reason/);
+  assert.match(tabs, /bot\.status/);
+});
+
+test("rank and streak notices compare against prior state before showing", async () => {
+  const fs = await import("node:fs/promises");
+  const source = await fs.readFile(`${root}/components/pulse5/competition-notice.tsx`, "utf8");
+  assert.match(source, /previousRef/);
+  assert.match(source, /after\.wins >= 3 && after\.wins > before\.wins/);
+  assert.match(source, /current\.playerRank < previous\.playerRank/);
 });

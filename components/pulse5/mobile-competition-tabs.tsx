@@ -78,7 +78,9 @@ export function MobileCompetitionTabs({
             <div className="bot-status-strip">
               {bots.map((bot) => (
                 <span key={bot.definition.id} title={`${bot.definition.name}：${bot.lastAction}`}>
-                  <Bot aria-hidden="true" /><b>{bot.definition.shortName}</b>{bot.lastAction} · {bot.engine.ledger.orders.length}单
+                  <Bot aria-hidden="true" /><b>{bot.definition.shortName}</b>
+                  <i data-state={bot.status}>{bot.status}</i>
+                  <small>{bot.lastAction}</small>
                 </span>
               ))}
             </div>
@@ -86,15 +88,14 @@ export function MobileCompetitionTabs({
             {liveOrders.length > 0 ? (
               <div className="live-order-list">
                 <div className="live-order-head" aria-hidden="true">
-                  <span>时间</span><span>用户</span><span>方向</span><span>金额</span><span>身份</span>
+                  <span>时间</span><span>用户 / 理由</span><span>方向</span><span>金额</span>
                 </div>
                 {liveOrders.map(({ order, user, role }) => (
                   <div className="live-order-row" key={`${user}-${order.id}`}>
                     <span>{timeLabel(order.createdAt)}</span>
-                    <strong>{user}</strong>
+                    <span className="live-order-user"><strong>{user}</strong><small>{role}{order.reason ? ` · ${order.reason}` : ""}</small></span>
                     <span className={order.side === "up" ? "up" : "down"}>{order.side === "up" ? "看涨" : "看跌"}</span>
                     <b>{money.format(order.stake)}</b>
-                    <em>{role}</em>
                   </div>
                 ))}
               </div>

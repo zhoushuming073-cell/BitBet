@@ -57,7 +57,7 @@ export class BotAlphaStrategy implements BotStrategy {
       action,
       stake: sizedStake(context.availableBalance, risk),
       confidence,
-      reason: action === "UP" ? "短线斜率与上涨 tick 同向" : "短线斜率与下跌 tick 同向",
+      reason: confidence > 0.76 ? "短线动量增强" : "趋势仍然有效",
     };
   }
 }

@@ -107,6 +107,8 @@ export interface Order {
   priceImpactPercent: number;
   quoteId: string;
   idempotencyKey: string;
+  /** Short strategy explanation for bot orders; absent for manual orders. */
+  reason?: string;
   status: OrderStatus;
   payout: number;
   profit: number;

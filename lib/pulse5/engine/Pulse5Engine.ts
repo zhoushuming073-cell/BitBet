@@ -315,7 +315,7 @@ export class Pulse5Engine {
    * latency / an outdated preview quote can never block or mis-fill the order.
    * The resulting order is a pending ("挂单"/OPEN) position until settlement.
    */
-  placeOrder(side: Side, stakeRaw: number, idempotencyKey: string, now: number): Order {
+  placeOrder(side: Side, stakeRaw: number, idempotencyKey: string, now: number, reason?: string): Order {
     const snapshot = this.buildMarketSnapshot(now);
     const gateResult = this.gate(snapshot, now);
     const round = roundFor(now);
@@ -350,6 +350,7 @@ export class Pulse5Engine {
       currentRoundId: round.id,
       now,
       gate: { canBet: gateResult.canBet, reason: gateResult.reason },
+      reason,
     });
     this.ensureRoundRecord(
       round.id,

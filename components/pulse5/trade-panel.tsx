@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, CircleCheck, LockKeyhole, TriangleAlert } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { GAME_CONFIG } from "@/lib/pulse5/game/gameConfig";
-import { quickAmountsFor } from "@/lib/pulse5/game/quickAmounts";
+import { availableQuickAmountsFor } from "@/lib/pulse5/game/quickAmounts";
 import type { Pulse5Engine, EngineView } from "@/lib/pulse5/engine/Pulse5Engine";
 import type { Side } from "@/lib/pulse5/engine/types";
 
@@ -94,7 +94,7 @@ export function TradePanel({
   // Current balance plus this round's committed amount reconstructs the balance
   // at the start of the round, so quick amounts stay stable after a prediction.
   const roundStartingBalance = balance + view.position.totalInvested;
-  const quickAmounts = quickAmountsFor(roundStartingBalance);
+  const quickAmounts = availableQuickAmountsFor(roundStartingBalance, balance);
 
   const chooseSide = (nextSide: Side) => {
     setSide(nextSide);
@@ -181,7 +181,7 @@ export function TradePanel({
             {quickMoney.format(value)}
           </button>
         ))}
-        <button type="button" onClick={() => setQuickAmount(balance)}>全仓</button>
+        <button type="button" onClick={() => setQuickAmount(balance)} disabled={balance < GAME_CONFIG.MIN_BET}>全仓</button>
       </div>
 
       <div className="side-choice" aria-label="选择竞猜方向">

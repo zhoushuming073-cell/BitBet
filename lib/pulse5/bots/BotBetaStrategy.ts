@@ -65,7 +65,7 @@ export class BotBetaStrategy implements BotStrategy {
       action,
       stake: sizedStake(context.availableBalance, risk),
       confidence,
-      reason: action === "DOWN" ? "冲高后动量放缓，尝试回归" : "急跌后动量放缓，尝试回归",
+      reason: Math.abs(metrics.meanDeviation) > config.minMeanDeviation * 1.8 ? "价格偏离均值" : "动量开始衰减",
     };
   }
 }
