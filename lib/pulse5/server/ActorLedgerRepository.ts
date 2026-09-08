@@ -1,4 +1,4 @@
-import type { LedgerSnapshot } from "../engine/types";
+import type { LedgerSnapshot, PricePointLike } from "../engine/types";
 import { emptySnapshot } from "../orders/LedgerStore";
 import { DEFAULT_LAMBDA_CONFIG, sanitizeLambdaConfig, type LambdaConfig } from "../bots/lambda/LambdaConfig";
 import { defaultLambdaLearningState, type LambdaLearningState } from "../bots/lambda/LambdaLearning";
@@ -11,6 +11,7 @@ export interface BotRuntimeState {
   observedRoundId: number | null;
   skippedRoundIds: number[];
   orderSequence: number;
+  priceSamples: PricePointLike[];
 }
 
 export interface ActorLedgerRecord {
@@ -40,7 +41,7 @@ const memoryLearning = new Map<string, StoredLambdaLearningState>();
 export interface StoredLambdaLearningState extends LambdaLearningState { version: number }
 
 export function defaultBotRuntime(): BotRuntimeState {
-  return { lastAction: "观察中", lastEvaluatedAt: 0, observedRoundId: null, skippedRoundIds: [], orderSequence: 0 };
+  return { lastAction: "观察中", lastEvaluatedAt: 0, observedRoundId: null, skippedRoundIds: [], orderSequence: 0, priceSamples: [] };
 }
 
 function isMissingLearningTable(error: unknown) {

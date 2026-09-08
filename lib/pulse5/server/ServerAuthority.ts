@@ -139,7 +139,17 @@ async function advanceActor(
 ) {
   const info = BOT_INFO[type];
   return saveWithRetry(repo, { userId, type, displayName: info.name }, async (record) => {
-    const engine = prepareEngine(record, market, now);
+    const samplesByTime = new Map<number, number>();
+    for (const sample of [...record.runtime.priceSamples, ...market.priceSamples, { time: now, price: market.midPrice }]) {
+      if (sample.time < now - 90_000 || sample.time > now || !Number.isFinite(sample.price) || sample.price <= 0) continue;
+      samplesByTime.set(sample.time, sample.price);
+    }
+    record.runtime.priceSamples = [...samplesByTime.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .slice(-500)
+      .map(([time, price]) => ({ time, price }));
+    const actorMarket = { ...market, priceSamples: record.runtime.priceSamples };
+    const engine = prepareEngine(record, actorMarket, now);
     const settledRoundIds = await settleDue(engine, now, true);
     const currentRound = roundFor(now).id;
     if (record.runtime.observedRoundId !== currentRound) {
@@ -154,7 +164,7 @@ async function advanceActor(
       const strategy: BotStrategy = type === "alpha"
         ? new BotAlphaStrategy()
         : type === "beta" ? new BotBetaStrategy() : new BotLambdaStrategy(lambdaLearning!.config);
-      const context = strategyContext(engine, market, now);
+      const context = strategyContext(engine, actorMarket, now);
       const latestOrder = engine.ledger.openOrdersForRound(currentRound)[0];
       const decision = context && (!latestOrder || now - latestOrder.createdAt >= info.cooldown)
         ? strategy.decide(context)

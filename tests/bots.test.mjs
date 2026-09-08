@@ -124,6 +124,16 @@ test("online tick rate limits exchange reads before advancing ledgers", async ()
   assert.match(tickBody, /Return the last[\s\S]*HTTP 200/);
 });
 
+test("bot market observations persist across stateless worker requests", async () => {
+  const fs = await import("node:fs/promises");
+  const authority = await fs.readFile(`${root}/lib/pulse5/server/ServerAuthority.ts`, "utf8");
+  const repository = await fs.readFile(`${root}/lib/pulse5/server/ActorLedgerRepository.ts`, "utf8");
+  assert.match(repository, /priceSamples: PricePointLike\[\]/);
+  assert.match(authority, /record\.runtime\.priceSamples/);
+  assert.match(authority, /sample\.time < now - 90_000/);
+  assert.match(authority, /strategyContext\(engine, actorMarket, now\)/);
+});
+
 test("mobile competition combines player and bot open orders in tabs", async () => {
   const fs = await import("node:fs/promises");
   const tabs = await fs.readFile(`${root}/components/pulse5/mobile-competition-tabs.tsx`, "utf8");
