@@ -20,9 +20,11 @@ import {
   claimAuthority,
   claimAuthorityAll,
   fetchAuthorityState,
+  tickAuthorityState,
   saveLambdaConfig,
   submitAuthorityOrder,
   type AuthorityBotPayload,
+  type AuthorityCompetitionPayload,
 } from "@/lib/game/authority-client";
 
 const money = new Intl.NumberFormat("en-US", {
@@ -41,6 +43,7 @@ export function MarketGame() {
   const [view, setView] = useState<EngineView | null>(null);
   const [authorityBots, setAuthorityBots] = useState<AuthorityBotPayload[]>([]);
   const [lambdaConfig, setLambdaConfig] = useState<LambdaConfig>(DEFAULT_LAMBDA_CONFIG);
+  const [lambdaLearning, setLambdaLearning] = useState<AuthorityCompetitionPayload["lambdaLearning"] | null>(null);
   const [lambdaOpen, setLambdaOpen] = useState(false);
   const [authorityReady, setAuthorityReady] = useState(false);
   const [authRequired, setAuthRequired] = useState(false);
@@ -63,13 +66,14 @@ export function MarketGame() {
     };
   }, []);
 
-  const refreshAuthority = useCallback(async (signal?: AbortSignal) => {
+  const refreshAuthority = useCallback(async (signal?: AbortSignal, advance = false) => {
     if (!runtime) return;
     try {
-      const state = await fetchAuthorityState(signal);
+      const state = advance ? await tickAuthorityState(signal) : await fetchAuthorityState(signal);
       runtime.engine.restoreLedger(state.player);
       setAuthorityBots(state.bots);
       setLambdaConfig(state.lambdaConfig);
+      setLambdaLearning(state.lambdaLearning);
       setAuthorityReady(true);
       setAuthRequired(false);
       setSyncError("");
@@ -86,8 +90,8 @@ export function MarketGame() {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
-      await refreshAuthority(controller.signal);
-      if (!controller.signal.aborted) timer = setTimeout(poll, 2_000);
+      await refreshAuthority(controller.signal, true);
+      if (!controller.signal.aborted) timer = setTimeout(poll, 1_500);
     };
     void poll();
     return () => {
@@ -170,7 +174,7 @@ export function MarketGame() {
     <main className="app-shell">
       <RoundResultToast notice={view.lastSettlement} onClaim={claimAll} />
       <CompetitionNotice playerEngine={runtime.engine} bots={bots} />
-      {lambdaOpen ? <LambdaConfigPanel open config={lambdaConfig} onClose={() => setLambdaOpen(false)} onSave={handleLambdaSave} /> : null}
+      {lambdaOpen ? <LambdaConfigPanel open config={lambdaConfig} learning={lambdaLearning} onClose={() => setLambdaOpen(false)} onSave={handleLambdaSave} /> : null}
 
       <header className="topbar">
         <div className="brand">
@@ -183,7 +187,7 @@ export function MarketGame() {
             <span>{view.connected ? "实时行情" : "重连中"}</span>
           </div>
           <button className="lambda-config-trigger" type="button" onClick={() => setLambdaOpen(true)} title="配置 Bot Lambda">
-            <Settings2 aria-hidden="true" /><span>Lambda</span>
+            <Settings2 aria-hidden="true" /><span>Lambda{lambdaLearning ? ` · Lv.${lambdaLearning.level}` : ""}</span>
           </button>
           <div className="bot-presence" title="三个机器人由服务端使用各自的虚拟账户交易">
             <Bot aria-hidden="true" />

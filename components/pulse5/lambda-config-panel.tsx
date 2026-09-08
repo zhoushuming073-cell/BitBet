@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Settings2, X } from "lucide-react";
 import type { LambdaConfig, LambdaIndicatorKey, LambdaMarketRegime } from "@/lib/pulse5/bots/lambda/LambdaConfig";
+import type { AuthorityCompetitionPayload } from "@/lib/game/authority-client";
 
 const signalNames: Record<LambdaIndicatorKey, string> = {
   shortReturn: "短线涨跌幅", slope: "价格斜率", movingAverage: "价格 / 均线", tickImbalance: "Tick 多空比",
@@ -12,9 +13,10 @@ const regimeNames: Record<LambdaMarketRegime, string> = {
   trend: "趋势", range: "震荡", highVolatility: "高波动", lowVolatility: "低波动",
 };
 
-export function LambdaConfigPanel({ open, config, onClose, onSave }: {
+export function LambdaConfigPanel({ open, config, learning, onClose, onSave }: {
   open: boolean;
   config: LambdaConfig;
+  learning: AuthorityCompetitionPayload["lambdaLearning"] | null;
   onClose: () => void;
   onSave: (config: LambdaConfig) => Promise<void>;
 }) {
@@ -40,6 +42,19 @@ export function LambdaConfigPanel({ open, config, onClose, onSave }: {
 
         <div className="lambda-scroll">
           <p className="lambda-note">只使用决策当时已产生的行情。参数在下一次扫描时生效。</p>
+          {learning ? (
+            <div className="lambda-growth">
+              <div><strong>Lv. {learning.level}</strong><span>Generation {learning.generation}</span><em>{learning.stage}</em></div>
+              <div className="lambda-exp-head"><span>EXP</span><b>{learning.expInLevel} / {learning.expToNextLevel}</b></div>
+              <div className="lambda-exp" role="progressbar" aria-label="Lambda 学习进度" aria-valuemin={0} aria-valuemax={learning.expToNextLevel} aria-valuenow={learning.expInLevel}><i style={{ width: `${learning.expInLevel}%` }} /></div>
+              {learning.recentReports[0] ? (
+                <div className="lambda-learning-note">
+                  <b>最近学习</b><span>{learning.recentReports[0].summary}</span>
+                  {learning.recentReports[0].changes.map((change) => <small key={change}>{change}</small>)}
+                </div>
+              ) : <div className="lambda-learning-note"><b>最近学习</b><span>完成真实比赛并结算后开始积累经验。</span></div>}
+            </div>
+          ) : null}
           <div className="lambda-section-title"><b>信号组合</b><span>启用 · 窗口 · 权重</span></div>
           <div className="lambda-signals">
             {draft.indicators.map((item) => (
@@ -49,7 +64,7 @@ export function LambdaConfigPanel({ open, config, onClose, onSave }: {
                   {[15, 20, 30, 40, 60].map((seconds) => <option key={seconds} value={seconds * 1000}>{seconds}s</option>)}
                 </select>
                 <div className="lambda-stars" aria-label={`${signalNames[item.key]}权重`}>
-                  {[1, 2, 3, 4, 5].map((weight) => <button type="button" key={weight} className={weight <= item.weight ? "active" : ""} onClick={() => updateIndicator(item.key, { weight: weight as 1 | 2 | 3 | 4 | 5 })}>★</button>)}
+                  {[1, 2, 3, 4, 5].map((weight) => <button type="button" key={weight} className={weight <= item.weight ? "active" : ""} onClick={() => updateIndicator(item.key, { weight })}>★</button>)}
                 </div>
               </div>
             ))}

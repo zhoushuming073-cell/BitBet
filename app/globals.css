@@ -278,6 +278,18 @@ footer svg { width: 15px; color: #87929c; }
 .lambda-panel > header > button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: #19222a; color: #9aa5af; }
 .lambda-scroll { overflow-y: auto; padding: 14px 16px 18px; scrollbar-width: thin; }
 .lambda-note { margin: 0 0 14px; color: #84919b; font-size: 11px; }
+.lambda-growth { display: grid; gap: 7px; padding: 10px; border: 1px solid rgba(156,131,237,.28); border-radius: 10px; background: rgba(144,112,232,.07); }
+.lambda-growth > div:first-child, .lambda-exp-head { display: flex; align-items: center; gap: 9px; }
+.lambda-growth > div:first-child strong { color: #d8ccff; font-family: var(--font-mono); font-size: 14px; }
+.lambda-growth > div:first-child span, .lambda-growth > div:first-child em { color: #8f9aa3; font-size: 10px; font-style: normal; }
+.lambda-growth > div:first-child em { margin-left: auto; color: #b9a8ee; }
+.lambda-exp-head { justify-content: space-between; color: #84909a; font-size: 9px; }
+.lambda-exp-head b { color: #b8c1c9; font-family: var(--font-mono); }
+.lambda-exp { height: 5px; overflow: hidden; border-radius: 99px; background: #202932; }
+.lambda-exp i { display: block; height: 100%; border-radius: inherit; background: #9c83ed; }
+.lambda-learning-note { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; color: #939ea7; font-size: 10px; }
+.lambda-learning-note b { color: #c8d0d6; }
+.lambda-learning-note small { grid-column: 2; color: #ad9bea; font-family: var(--font-mono); font-size: 9px; }
 .lambda-section-title { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 7px; color: #dfe4e8; font-size: 12px; }
 .lambda-section-title span { color: #697680; font-size: 9px; }
 .lambda-signals { display: grid; gap: 4px; }

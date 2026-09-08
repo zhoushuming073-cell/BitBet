@@ -1,6 +1,7 @@
 import type { BotDisplayState } from "@/lib/pulse5/bots/BotDisplayState";
 import type { LambdaConfig } from "@/lib/pulse5/bots/lambda/LambdaConfig";
 import type { LedgerSnapshot, Side } from "@/lib/pulse5/engine/types";
+import type { LambdaLearningReport } from "@/lib/pulse5/bots/lambda/LambdaLearning";
 
 export interface AuthorityBotPayload {
   id: "alpha" | "beta" | "lambda";
@@ -17,6 +18,19 @@ export interface AuthorityCompetitionPayload {
   player: LedgerSnapshot;
   bots: AuthorityBotPayload[];
   lambdaConfig: LambdaConfig;
+  lambdaLearning: {
+    exp: number;
+    level: number;
+    generation: number;
+    totalRounds: number;
+    effectiveExperiences: number;
+    calibrationBias: number;
+    processedRoundIds: number[];
+    recentReports: LambdaLearningReport[];
+    stage: "初生期" | "适应期" | "成熟期";
+    expInLevel: number;
+    expToNextLevel: number;
+  };
   serverTime: number;
 }
 
@@ -28,6 +42,16 @@ async function readJson<T>(response: Response): Promise<T> {
 
 export async function fetchAuthorityState(signal?: AbortSignal) {
   return readJson<AuthorityCompetitionPayload>(await fetch("/api/game/state", { cache: "no-store", signal }));
+}
+
+export async function tickAuthorityState(signal?: AbortSignal) {
+  return readJson<AuthorityCompetitionPayload>(await fetch("/api/game/tick", {
+    method: "POST",
+    cache: "no-store",
+    signal,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tickId: crypto.randomUUID() }),
+  }));
 }
 
 export async function submitAuthorityOrder(side: Side, stake: number, idempotencyKey: string) {

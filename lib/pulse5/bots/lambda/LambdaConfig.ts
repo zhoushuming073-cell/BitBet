@@ -15,7 +15,7 @@ export interface LambdaIndicatorConfig {
   key: LambdaIndicatorKey;
   enabled: boolean;
   windowMs: number;
-  weight: 1 | 2 | 3 | 4 | 5;
+  weight: number;
 }
 
 export interface LambdaExtraCondition {
@@ -76,7 +76,7 @@ export function sanitizeLambdaConfig(value: unknown): LambdaConfig {
         key: item.key,
         enabled: Boolean(item.enabled),
         windowMs: Math.min(60_000, Math.max(8_000, Math.round(Number(item.windowMs) || 20_000))),
-        weight: Math.min(5, Math.max(1, Math.round(Number(item.weight) || 1))) as 1 | 2 | 3 | 4 | 5,
+        weight: Math.round(clamp(Number(item.weight), 1, 5, 1) * 100) / 100,
       }))
     : DEFAULT_LAMBDA_CONFIG.indicators;
   const activity = Math.min(3, Math.max(1, Math.round(Number(input.activity) || 2))) as 1 | 2 | 3;

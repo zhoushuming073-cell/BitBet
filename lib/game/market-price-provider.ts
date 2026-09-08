@@ -26,6 +26,12 @@ export interface MarketPriceProvider {
 }
 
 let provider: MarketPriceProvider | null = null;
+const SNAPSHOT_FRESH_MS = 1_500;
+const SNAPSHOT_STALE_FALLBACK_MS = 30_000;
+let cachedSnapshot: { value: ServerMarketSnapshot; fetchedAt: number } | null = null;
+let snapshotInFlight: Promise<ServerMarketSnapshot> | null = null;
+const ohlcCaches = new Map<number, { sinceMs: number; fetchedAt: number; rows: KrakenOhlcRow[] }>();
+const ohlcInFlight = new Map<number, { sinceMs: number; request: Promise<KrakenOhlcRow[]> }>();
 
 export function configureMarketPriceProvider(next: MarketPriceProvider): void {
   provider = next;
@@ -54,6 +60,28 @@ function ascendingCandles(rows: KrakenOhlcRow[]) {
   return [...rows].sort((a, b) => a[0] - b[0]);
 }
 
+async function getCachedOhlc(interval: 1 | 5, sinceMs: number): Promise<KrakenOhlcRow[]> {
+  const cached = ohlcCaches.get(interval);
+  if (cached && cached.sinceMs <= sinceMs && Date.now() - cached.fetchedAt <= 60_000) return cached.rows;
+  const pending = ohlcInFlight.get(interval);
+  if (pending && pending.sinceMs <= sinceMs) return pending.request;
+
+  const request = krakenQuery<Record<string, KrakenOhlcRow[]> & { last?: string }>(
+    `/OHLC?pair=${PAIR}&interval=${interval}&since=${Math.floor(sinceMs / 1000)}`,
+  ).then((result) => ascendingCandles(pairValue<KrakenOhlcRow[]>(result)));
+  ohlcInFlight.set(interval, { sinceMs, request });
+  try {
+    const rows = await request;
+    ohlcCaches.set(interval, { sinceMs, fetchedAt: Date.now(), rows });
+    return rows;
+  } catch (error) {
+    if (cached && cached.sinceMs <= sinceMs) return cached.rows;
+    throw error;
+  } finally {
+    if (ohlcInFlight.get(interval)?.request === request) ohlcInFlight.delete(interval);
+  }
+}
+
 export async function getServerMarketSnapshot(now: number, devClientPrice?: number): Promise<ServerMarketSnapshot> {
   if (provider) return provider.getSnapshot(now);
   const allowDevPrice = Number.isFinite(devClientPrice) || (process.env.NODE_ENV !== "production"
@@ -72,54 +100,75 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
     };
   }
 
-  const round = roundFor(now);
-  const since = Math.floor((now - 82 * 60_000) / 1000);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
-  try {
-    const [tickerResult, minuteResult, tradeResult] = await Promise.all([
-      krakenQuery<Record<string, KrakenTicker>>(`/Ticker?pair=${PAIR}`, controller.signal),
-      krakenQuery<Record<string, KrakenOhlcRow[]> & { last?: string }>(`/OHLC?pair=${PAIR}&interval=1&since=${since}`, controller.signal),
-      krakenQuery<Record<string, KrakenTradeRow[]> & { last?: string }>(`/Trades?pair=${PAIR}`, controller.signal).catch(() => null),
-    ]);
-    const ticker = pairValue<KrakenTicker>(tickerResult);
-    const minuteRows = ascendingCandles(pairValue<KrakenOhlcRow[]>(minuteResult));
-    const bid = Number(ticker?.b?.[0]);
-    const ask = Number(ticker?.a?.[0]);
-    const lastPrice = Number(ticker?.c?.[0]);
-    const midPrice = bid > 0 && ask > 0 ? (bid + ask) / 2 : lastPrice;
-    const roundRow = minuteRows.find((row) => row[0] * 1000 === round.id);
-    const roundOpen = Number(roundRow?.[1] ?? midPrice);
-    if (![bid, ask, midPrice, roundOpen].every((value) => Number.isFinite(value) && value > 0)) {
-      throw new Error("BTC 行情字段无效");
+  const wallNow = Date.now();
+  if (cachedSnapshot && wallNow - cachedSnapshot.fetchedAt <= SNAPSHOT_FRESH_MS) return cachedSnapshot.value;
+  if (snapshotInFlight) {
+    try { return await snapshotInFlight; }
+    catch (error) {
+      if (cachedSnapshot && wallNow - cachedSnapshot.fetchedAt <= SNAPSHOT_STALE_FALLBACK_MS) return cachedSnapshot.value;
+      throw error;
     }
-    const priceSamples = tradeResult
-      ? pairValue<KrakenTradeRow[]>(tradeResult)
-        .map((row) => ({ time: Math.round(row[2] * 1000), price: Number(row[0]) }))
-        .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.price) && item.price > 0 && item.time <= now)
-        .sort((a, b) => a.time - b.time)
-      : [];
-    const latestTradeAt = priceSamples.at(-1)?.time;
-    if (latestTradeAt !== now) priceSamples.push({ time: now, price: midPrice });
-    return {
-      midPrice,
-      bid,
-      ask,
-      observedAt: latestTradeAt ? Math.min(now, latestTradeAt) : now,
-      roundOpen,
-      volatilityCloses: minuteRows.map((row) => Number(row[4])).filter((value) => Number.isFinite(value) && value > 0),
-      priceSamples,
-    };
+  }
+
+  const request = (async () => {
+    const round = roundFor(now);
+    const since = Math.floor((now - 82 * 60_000) / 1000);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const [tickerResult, minuteResult, tradeResult] = await Promise.all([
+        krakenQuery<Record<string, KrakenTicker>>(`/Ticker?pair=${PAIR}`, controller.signal),
+        krakenQuery<Record<string, KrakenOhlcRow[]> & { last?: string }>(`/OHLC?pair=${PAIR}&interval=1&since=${since}`, controller.signal),
+        krakenQuery<Record<string, KrakenTradeRow[]> & { last?: string }>(`/Trades?pair=${PAIR}`, controller.signal).catch(() => null),
+      ]);
+      const ticker = pairValue<KrakenTicker>(tickerResult);
+      const minuteRows = ascendingCandles(pairValue<KrakenOhlcRow[]>(minuteResult));
+      const bid = Number(ticker?.b?.[0]);
+      const ask = Number(ticker?.a?.[0]);
+      const lastPrice = Number(ticker?.c?.[0]);
+      const midPrice = bid > 0 && ask > 0 ? (bid + ask) / 2 : lastPrice;
+      const roundRow = minuteRows.find((row) => row[0] * 1000 === round.id);
+      const roundOpen = Number(roundRow?.[1] ?? midPrice);
+      if (![bid, ask, midPrice, roundOpen].every((value) => Number.isFinite(value) && value > 0)) {
+        throw new Error("BTC 行情字段无效");
+      }
+      const priceSamples = tradeResult
+        ? pairValue<KrakenTradeRow[]>(tradeResult)
+          .map((row) => ({ time: Math.round(row[2] * 1000), price: Number(row[0]) }))
+          .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.price) && item.price > 0 && item.time <= now)
+          .sort((a, b) => a.time - b.time)
+        : [];
+      const latestTradeAt = priceSamples.at(-1)?.time;
+      if (latestTradeAt !== now) priceSamples.push({ time: now, price: midPrice });
+      return {
+        midPrice,
+        bid,
+        ask,
+        observedAt: latestTradeAt ? Math.min(now, latestTradeAt) : now,
+        roundOpen,
+        volatilityCloses: minuteRows.map((row) => Number(row[4])).filter((value) => Number.isFinite(value) && value > 0),
+        priceSamples,
+      } satisfies ServerMarketSnapshot;
+    } finally {
+      clearTimeout(timeout);
+    }
+  })();
+  snapshotInFlight = request;
+  try {
+    const value = await request;
+    cachedSnapshot = { value, fetchedAt: Date.now() };
+    return value;
+  } catch (error) {
+    if (cachedSnapshot && Date.now() - cachedSnapshot.fetchedAt <= SNAPSHOT_STALE_FALLBACK_MS) return cachedSnapshot.value;
+    throw error;
   } finally {
-    clearTimeout(timeout);
+    if (snapshotInFlight === request) snapshotInFlight = null;
   }
 }
 
 export async function getClosedServerCandle(roundId: number) {
-  const result = await krakenQuery<Record<string, KrakenOhlcRow[]> & { last?: string }>(
-    `/OHLC?pair=${PAIR}&interval=5&since=${Math.floor(roundId / 1000)}`,
-  );
-  const row = pairValue<KrakenOhlcRow[]>(result).find((item) => item[0] * 1000 === roundId);
+  const rows = await getCachedOhlc(5, roundId);
+  const row = rows.find((item) => item[0] * 1000 === roundId);
   if (!row || roundId + 5 * 60 * 1000 > Date.now()) return null;
   return { open: Number(row[1]), close: Number(row[4]), closeTime: roundId + 5 * 60 * 1000 - 1 };
 }
@@ -127,10 +176,7 @@ export async function getClosedServerCandle(roundId: number) {
 /** Historical replay uses only candle values that were visible at each minute close. */
 export async function getHistoricalRoundMarket(roundId: number) {
   const round = roundFor(roundId);
-  const result = await krakenQuery<Record<string, KrakenOhlcRow[]> & { last?: string }>(
-    `/OHLC?pair=${PAIR}&interval=1&since=${Math.floor(round.start / 1000)}`,
-  );
-  const rows = ascendingCandles(pairValue<KrakenOhlcRow[]>(result))
+  const rows = (await getCachedOhlc(1, round.start))
     .filter((row) => row[0] * 1000 >= round.start && row[0] * 1000 < round.end);
   if (!rows.length) return null;
 

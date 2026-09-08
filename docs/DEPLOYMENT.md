@@ -6,6 +6,8 @@
 - 身份：Sites 网关注入的 ChatGPT 用户 ID；客户端提交的 `userId` 不受信任。
 - 数据：D1 的 `game_actor_ledgers`、`lambda_configs`、`bot_scheduler_leases`。
 - 行情：客户端与服务端统一使用 Kraken BTC/USDT 公共市场数据；服务端读取盘口、分钟 K 线和官方 5 分钟结算 K 线。
+- 运行：`GET /api/game/state` 只读取当前状态；网页在线时通过 `POST /api/game/tick` 推进四人比赛。关闭网页后不会后台运行或补造离线订单。
+- Lambda：只在真实订单结算后进行受硬上限约束的小步学习，成长状态与学习报告保存到 D1。
 - 权威路径：玩家下单、Bot 决策、实际执行赔率、资金扣减、结算和领取都在服务端完成。
 - 并发：账本使用版本号进行乐观并发控制；调度器使用 D1 lease 避免重复执行。
 
