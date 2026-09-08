@@ -4,11 +4,7 @@ const KRAKEN_MARKET_API = "https://api.kraken.com/0/public";
 const PAIR = "XBTUSDT";
 
 type KrakenOhlcRow = [number, string, string, string, string, string, string, number];
-type KrakenTicker = {
-  a: [string, string, string];
-  b: [string, string, string];
-  c: [string, string];
-};
+type KrakenTradeRow = [string, string, number, string, string, string, number?];
 
 export interface ServerMarketSnapshot {
   midPrice: number;
@@ -32,7 +28,6 @@ let snapshotInFlight: Promise<ServerMarketSnapshot> | null = null;
 let snapshotRetryAfter = 0;
 const ohlcCaches = new Map<number, { sinceMs: number; fetchedAt: number; rows: KrakenOhlcRow[] }>();
 const ohlcInFlight = new Map<number, { sinceMs: number; request: Promise<KrakenOhlcRow[]> }>();
-let livePriceSamples: Array<{ time: number; price: number }> = [];
 
 export function configureMarketPriceProvider(next: MarketPriceProvider): void {
   provider = next;
@@ -121,33 +116,30 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8_000);
     try {
-      const [tickerResult, minuteRows] = await Promise.all([
-        krakenQuery<Record<string, KrakenTicker>>(`/Ticker?pair=${PAIR}`, controller.signal),
+      const [tradeResult, minuteRows] = await Promise.all([
+        krakenQuery<Record<string, KrakenTradeRow[]> & { last?: string }>(`/Trades?pair=${PAIR}`, controller.signal),
         getCachedOhlc(1, since * 1000),
       ]);
-      const ticker = pairValue<KrakenTicker>(tickerResult);
-      const bid = Number(ticker?.b?.[0]);
-      const ask = Number(ticker?.a?.[0]);
-      const lastPrice = Number(ticker?.c?.[0]);
-      const midPrice = bid > 0 && ask > 0 ? (bid + ask) / 2 : lastPrice;
+      const priceSamples = pairValue<KrakenTradeRow[]>(tradeResult)
+        .map((row) => ({ time: Math.round(row[2] * 1000), price: Number(row[0]) }))
+        .filter((sample) => sample.time >= now - 90_000 && sample.time <= now && Number.isFinite(sample.price) && sample.price > 0)
+        .sort((a, b) => a.time - b.time)
+        .filter((sample, index, all) => index === 0 || sample.time !== all[index - 1].time);
+      const latest = priceSamples.at(-1);
+      if (!latest) throw new Error("BTC 最近成交样本不足");
+      const midPrice = latest.price;
+      const bid = midPrice - 0.5;
+      const ask = midPrice + 0.5;
       const roundRow = minuteRows.find((row) => row[0] * 1000 === round.id);
       const roundOpen = Number(roundRow?.[1] ?? midPrice);
       if (![bid, ask, midPrice, roundOpen].every((value) => Number.isFinite(value) && value > 0)) {
         throw new Error("BTC 行情字段无效");
       }
-      livePriceSamples.push({ time: now, price: midPrice });
-      livePriceSamples = livePriceSamples.filter((sample) => sample.time >= now - 90_000 && sample.time <= now);
-      const minuteSamples = minuteRows
-        .map((row) => ({ time: row[0] * 1000 + 60_000, price: Number(row[4]) }))
-        .filter((sample) => sample.time >= now - 90_000 && sample.time <= now && Number.isFinite(sample.price) && sample.price > 0);
-      const priceSamples = [...minuteSamples, ...livePriceSamples]
-        .sort((a, b) => a.time - b.time)
-        .filter((sample, index, all) => index === 0 || sample.time !== all[index - 1].time);
       return {
         midPrice,
         bid,
         ask,
-        observedAt: now,
+        observedAt: latest.time,
         roundOpen,
         volatilityCloses: minuteRows.map((row) => Number(row[4])).filter((value) => Number.isFinite(value) && value > 0),
         priceSamples,
