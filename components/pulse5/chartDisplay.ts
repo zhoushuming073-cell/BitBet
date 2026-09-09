@@ -18,6 +18,7 @@ export const CHART_DISPLAY_CONFIG = {
   TREND_MIN_RANGE_PERCENT: 0.0015,
   TREND_MIN_DISPLACEMENT_PERCENT: 0.0006,
   TREND_MIN_EFFICIENCY: 0.48,
+  MOBILE_MAX_CONNECTED_GAP_MS: 4_000,
 } as const;
 
 export interface TapeTexture {
@@ -34,6 +35,11 @@ export interface DisplaySeries {
   texture: TapeTexture;
   bucketMs: number;
   emaAlpha: number;
+}
+
+export function shouldConnectDisplayPoints(previous: PricePoint, next: PricePoint): boolean {
+  return next.time >= previous.time &&
+    next.time - previous.time <= CHART_DISPLAY_CONFIG.MOBILE_MAX_CONNECTED_GAP_MS;
 }
 
 const EMPTY_TEXTURE: TapeTexture = {

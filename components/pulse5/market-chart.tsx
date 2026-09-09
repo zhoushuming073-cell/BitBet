@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import type { Order, PricePoint } from "./types";
 import { CHART_CONFIG as C, VISIBLE_WINDOW_MS, clamp01, easeOutCubic } from "./chartConfig";
-import { CHART_DISPLAY_CONFIG, buildMobileDisplaySeries } from "./chartDisplay";
+import { CHART_DISPLAY_CONFIG, buildMobileDisplaySeries, shouldConnectDisplayPoints } from "./chartDisplay";
 import { lowerBound, rangeFromExtents, smoothRange } from "./chartScale";
 import { drawSmoothPath, type ChartPoint } from "./chartSmoothing";
 
@@ -294,7 +294,11 @@ export function MarketChart({
         ctx.beginPath();
         if (compact) {
           ctx.moveTo(curvePts[0].x, curvePts[0].y);
-          for (let i = 1; i < curvePts.length; i += 1) ctx.lineTo(curvePts[i].x, curvePts[i].y);
+          for (let i = 1; i < curvePts.length; i += 1) {
+            const point = curvePts[i];
+            if (shouldConnectDisplayPoints(displayPoints[i - 1], displayPoints[i])) ctx.lineTo(point.x, point.y);
+            else ctx.moveTo(point.x, point.y);
+          }
         } else {
           drawSmoothPath(ctx, curvePts);
         }

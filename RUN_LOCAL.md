@@ -1,6 +1,6 @@
 # BitBet 本地运行
 
-行情通过网络连接 Kraken BTC/USDT 公共接口；本地预览使用开发账户，线上账户、下注、余额和战绩由 Sites 服务端保存，不会产生真实交易所订单。
+行情主要通过网络连接 Binance BTC/USDT 公共接口，并在 Binance 受地区限制时使用 Kraken 公共行情降级；本地预览使用开发账户，线上账户、下注、余额和战绩由 Sites 服务端保存，不会产生真实交易所订单。
 
 游戏由在线页面每约 1.5 秒调用 `/api/game/tick` 推进；关闭页面后 Bot 停止运行，不补算离线期间的虚拟订单。Lambda 的学习只在其真实参赛订单正式结算后发生。
 
@@ -27,5 +27,5 @@ npm run dev
 ## 网络说明
 
 - 必须联网才能获取 BTC 实时价格。
-- 网络需要能够访问 Kraken 公共 REST 与 WebSocket 行情接口。
-- 虚拟余额和记录保存在浏览器 `localStorage`，清理浏览器网站数据后会重置。
+- 网络需要能够访问 Binance 或 Kraken 的公共 REST / WebSocket 行情接口。
+- 线上虚拟余额和记录保存在 Sites 服务端 D1 账本，不依赖浏览器 `localStorage`。

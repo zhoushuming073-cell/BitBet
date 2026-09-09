@@ -31,6 +31,17 @@ export interface AuthorityCompetitionPayload {
     expInLevel: number;
     expToNextLevel: number;
   };
+  /** Public market view shared by the page and every bot strategy. */
+  market: {
+    midPrice: number;
+    bid: number;
+    ask: number;
+    observedAt: number;
+    roundOpen: number;
+    volatilityCloses: number[];
+    priceSamples: Array<{ time: number; price: number }>;
+  } | null;
+  round: { id: number; start: number; lockTime: number; end: number };
   serverTime: number;
 }
 

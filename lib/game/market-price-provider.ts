@@ -1,6 +1,7 @@
 import { roundFor } from "@/lib/pulse5/game/RoundEngine";
 
 const KRAKEN_MARKET_API = "https://api.kraken.com/0/public";
+const BINANCE_MARKET_APIS = ["https://data-api.binance.vision", "https://api.binance.com"];
 const PAIR = "XBTUSDT";
 
 type KrakenOhlcRow = [number, string, string, string, string, string, string, number];
@@ -10,6 +11,8 @@ type KrakenTicker = {
   b: [string, string, string];
   c: [string, string];
 };
+type BinanceRow = Array<string | number>;
+type BinanceAggTrade = { p: string; T: number };
 
 export interface ServerMarketSnapshot {
   midPrice: number;
@@ -56,6 +59,57 @@ async function krakenQuery<T>(path: string, signal?: AbortSignal): Promise<T> {
   const payload = await response.json() as { error?: string[]; result?: T };
   if (payload.error?.length || !payload.result) throw new Error(payload.error?.join(", ") || "BTC 行情返回无效");
   return payload.result;
+}
+
+async function binanceQuery<T>(path: string, signal?: AbortSignal): Promise<T> {
+  let lastError: unknown = null;
+  for (const base of BINANCE_MARKET_APIS) {
+    try {
+      const response = await fetch(`${base}${path}`, {
+        signal,
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`Binance 行情请求失败 ${response.status}`);
+      return await response.json() as T;
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) break;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Binance 行情请求失败");
+}
+
+async function getBinanceMarketSnapshot(now: number, signal: AbortSignal): Promise<ServerMarketSnapshot> {
+  const round = roundFor(now);
+  const [book, minuteRows, trades] = await Promise.all([
+    binanceQuery<{ bidPrice: string; askPrice: string }>("/api/v3/ticker/bookTicker?symbol=BTCUSDT", signal),
+    binanceQuery<BinanceRow[]>("/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=82", signal),
+    binanceQuery<BinanceAggTrade[]>("/api/v3/aggTrades?symbol=BTCUSDT&limit=1000", signal),
+  ]);
+  const bid = Number(book.bidPrice);
+  const ask = Number(book.askPrice);
+  const midPrice = (bid + ask) / 2;
+  const roundOpen = Number(minuteRows.find((row) => Number(row[0]) === round.id)?.[1]);
+  const priceSamples = trades
+    .map((row) => ({ time: Number(row.T), price: Number(row.p) }))
+    .filter((sample) => sample.time >= now - 90_000 && sample.time <= now && sample.price > 0)
+    .sort((a, b) => a.time - b.time);
+  if (![bid, ask, midPrice, roundOpen].every((value) => Number.isFinite(value) && value > 0)) {
+    throw new Error("Binance 行情字段无效");
+  }
+  if (!priceSamples.length || priceSamples.at(-1)!.time < now - 1_000) {
+    priceSamples.push({ time: now, price: midPrice });
+  }
+  return {
+    midPrice,
+    bid,
+    ask,
+    observedAt: now,
+    roundOpen,
+    volatilityCloses: minuteRows.map((row) => Number(row[4])).filter((value) => Number.isFinite(value) && value > 0),
+    priceSamples,
+  };
 }
 
 function ascendingCandles(rows: KrakenOhlcRow[]) {
@@ -122,6 +176,14 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8_000);
     try {
+      // Binance is the canonical public quote source. A Kraken fallback keeps
+      // the game responsive in regions where Binance public endpoints are blocked.
+      try {
+        return await getBinanceMarketSnapshot(now, controller.signal);
+      } catch {
+        // Continue with the public fallback below. Both players and bots receive
+        // the exact same published snapshot; strategies never see the raw reply.
+      }
       const [tickerResult, tradeResult, minuteRows] = await Promise.all([
         krakenQuery<Record<string, KrakenTicker>>(`/Ticker?pair=${PAIR}`, controller.signal),
         krakenQuery<Record<string, KrakenTradeRow[]> & { last?: string }>(`/Trades?pair=${PAIR}`, controller.signal),
@@ -175,6 +237,17 @@ export async function getServerMarketSnapshot(now: number, devClientPrice?: numb
 }
 
 export async function getClosedServerCandle(roundId: number) {
+  try {
+    const rows = await binanceQuery<BinanceRow[]>(
+      `/api/v3/klines?symbol=BTCUSDT&interval=5m&startTime=${roundId}&limit=1`,
+    );
+    const row = rows[0];
+    if (row && Number(row[0]) === roundId && Number(row[6]) < Date.now()) {
+      return { open: Number(row[1]), close: Number(row[4]), closeTime: Number(row[6]) };
+    }
+  } catch {
+    // Settle from Kraken only when Binance cannot be reached.
+  }
   const rows = await getCachedOhlc(5, roundId);
   const row = rows.find((item) => item[0] * 1000 === roundId);
   if (!row || roundId + 5 * 60 * 1000 > Date.now()) return null;
@@ -184,6 +257,24 @@ export async function getClosedServerCandle(roundId: number) {
 /** Historical replay uses only candle values that were visible at each minute close. */
 export async function getHistoricalRoundMarket(roundId: number) {
   const round = roundFor(roundId);
+  try {
+    const rows = await binanceQuery<BinanceRow[]>(
+      `/api/v3/klines?symbol=BTCUSDT&interval=1s&startTime=${round.start}&endTime=${round.end - 1}&limit=300`,
+    );
+    const samples = rows.map((row) => ({ time: Number(row[0]), price: Number(row[4]) }))
+      .filter((sample) => sample.time >= round.start && sample.time < round.end && sample.price > 0);
+    if (samples.length >= 30) {
+      return {
+        round,
+        open: Number(rows[0][1]),
+        close: Number(rows.at(-1)![4]),
+        closeTime: Number(rows.at(-1)![6]),
+        samples,
+      };
+    }
+  } catch {
+    // Fall through to close-only Kraken replay when Binance is unavailable.
+  }
   const rows = (await getCachedOhlc(1, round.start))
     .filter((row) => row[0] * 1000 >= round.start && row[0] * 1000 < round.end);
   if (!rows.length) return null;

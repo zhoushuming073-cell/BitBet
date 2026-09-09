@@ -1,5 +1,6 @@
 import { GAME_CONFIG } from "../game/gameConfig";
 import { roundFor } from "../game/RoundEngine";
+import { BinanceFeedManager } from "../market/BinanceFeedManager";
 import { KrakenFeedManager } from "../market/KrakenFeedManager";
 import { BUFFER_WINDOW_MS, bucketAggTrades } from "../market/priceBuffer";
 import { Pulse5Engine } from "./Pulse5Engine";
@@ -42,9 +43,10 @@ export interface BrowserEngineOptions {
 }
 
 /**
- * Wires the display engine to the same live Kraken BTC/USDT market used by the server,
+ * Wires the display engine to Binance's public BTC/USDT stream. The server-published
+ * market view can also be merged by the page when this browser stream is unavailable.
  * round-open discovery, chart/volatility sampling and restart catch-up
- * settlement. Everything is virtual; no order is ever sent to Kraken.
+ * settlement. Everything is virtual; no order is ever sent to an exchange.
  */
 export function createBrowserEngine(options: BrowserEngineOptions = {}): BrowserRuntime {
   const storageKey = options.storageKey ?? GAME_CONFIG.STORAGE_KEY;
@@ -81,7 +83,7 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
     }, wait);
   };
 
-  const feed = new KrakenFeedManager({
+  const feed = new BinanceFeedManager({
     onBook: (bid, ask, ts) => {
       lastFeedTs = Date.now();
       engine.onBookTicker(bid, ask, ts);
@@ -119,7 +121,8 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
 
   async function ensureRoundOpen(roundId: number): Promise<void> {
     try {
-      const rows = await KrakenFeedManager.fetchKlines("5m", 1, roundId);
+      const rows = await BinanceFeedManager.fetchKlines("5m", 1, roundId)
+        .catch(() => KrakenFeedManager.fetchKlines("5m", 1, roundId));
       if (!disposed && rows[0] && rows[0][0] === roundId) {
         engine.setRoundOpen(roundId, Number(rows[0][1]));
       }
@@ -134,10 +137,10 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
     settling.add(roundId);
     try {
       const waitedSince = Date.now();
-      let candle = await KrakenFeedManager.fetchClosedCandle(roundId, Date.now());
+      let candle = await BinanceFeedManager.fetchClosedCandle(roundId, Date.now());
       while (candle && !candle.closed && Date.now() - waitedSince < GAME_CONFIG.SETTLE_MAX_WAIT_MS) {
         await new Promise((resolve) => setTimeout(resolve, GAME_CONFIG.SETTLE_RETRY_MS));
-        candle = await KrakenFeedManager.fetchClosedCandle(roundId, Date.now());
+        candle = await BinanceFeedManager.fetchClosedCandle(roundId, Date.now());
       }
       if (candle && candle.closed) {
         engine.settle(roundId, candle.open, candle.close, Date.now());
@@ -159,7 +162,8 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
   async function backfillGap(): Promise<void> {
     const now = Date.now();
     try {
-      const trades = await KrakenFeedManager.fetchAggTrades(now - BUFFER_WINDOW_MS, now);
+      const trades = await BinanceFeedManager.fetchAggTrades(now - BUFFER_WINDOW_MS, now)
+        .catch(() => KrakenFeedManager.fetchAggTrades(now - BUFFER_WINDOW_MS, now));
       if (!disposed) engine.mergeChart(bucketAggTrades(trades));
     } catch {
       /* ignore — live feed keeps appending */
@@ -189,7 +193,8 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
     // 1) Chart history: dense aggTrades bucketed to ~250ms. Falls back to sparse
     //    1m klines only if aggTrades fails — and never clears existing points.
     try {
-      const trades = await KrakenFeedManager.fetchAggTrades(now - 70_000, now);
+      const trades = await BinanceFeedManager.fetchAggTrades(now - 70_000, now)
+        .catch(() => KrakenFeedManager.fetchAggTrades(now - 70_000, now));
       if (!disposed) {
         const points = bucketAggTrades(trades);
         engine.seedChart(points);
@@ -197,7 +202,8 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
       }
     } catch {
       try {
-        const rows = await KrakenFeedManager.fetchKlines("1m", 3);
+        const rows = await BinanceFeedManager.fetchKlines("1m", 3)
+          .catch(() => KrakenFeedManager.fetchKlines("1m", 3));
         if (!disposed) {
           engine.seedChart(rows.map((row) => ({ time: Number(row[0]), price: Number(row[4]) })));
         }
@@ -208,7 +214,8 @@ export function createBrowserEngine(options: BrowserEngineOptions = {}): Browser
 
     // 2) Volatility warm-up: 1m klines (separate from the chart series).
     try {
-      const rows = await KrakenFeedManager.fetchKlines("1m", 80);
+      const rows = await BinanceFeedManager.fetchKlines("1m", 80)
+        .catch(() => KrakenFeedManager.fetchKlines("1m", 80));
       if (!disposed) engine.seedVolatility(rows.map((row) => Number(row[4])));
     } catch {
       /* live feed will still warm the estimator over time */

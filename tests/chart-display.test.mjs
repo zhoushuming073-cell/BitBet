@@ -53,3 +53,14 @@ test("a true directional move uses faster sampling, light smoothing, and an exac
   assert.ok(result.points.length >= 90 && result.points.length <= 100);
   assert.equal(result.points.at(-1).price, raw.at(-1).price);
 });
+
+test("mobile display does not draw a misleading diagonal line across a stale-feed gap", () => {
+  assert.equal(
+    display.shouldConnectDisplayPoints({ time: 1_000, price: 100 }, { time: 4_500, price: 101 }),
+    true,
+  );
+  assert.equal(
+    display.shouldConnectDisplayPoints({ time: 1_000, price: 100 }, { time: 5_500, price: 101 }),
+    false,
+  );
+});

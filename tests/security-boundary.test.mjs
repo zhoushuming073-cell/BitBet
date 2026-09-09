@@ -34,7 +34,20 @@ test("客户端价格回退必须同时是非 production 且显式开启", async
   delete process.env.ALLOW_CLIENT_MARKET_PRICE_DEV;
   assert.match(source, /process\.env\.NODE_ENV !== "production"/);
   assert.match(source, /ALLOW_CLIENT_MARKET_PRICE_DEV === "true"/);
+  assert.match(source, /data-api\.binance\.vision/);
   assert.match(source, /api\.kraken\.com\/0\/public/);
   if (previous === undefined) delete process.env.ALLOW_CLIENT_MARKET_PRICE_DEV;
   else process.env.ALLOW_CLIENT_MARKET_PRICE_DEV = previous;
+});
+
+test("机器人与网页共用服务端发布的公开行情快照", async () => {
+  const fs = await import("node:fs/promises");
+  const authority = await fs.readFile(`${root}/lib/pulse5/server/ServerAuthority.ts`, "utf8");
+  const client = await fs.readFile(`${root}/components/pulse5/market-game.tsx`, "utf8");
+  const orderClient = await fs.readFile(`${root}/lib/game/authority-client.ts`, "utf8");
+  assert.match(authority, /market: market \? \{ \.\.\.market \} : null/);
+  assert.match(authority, /priceSamples: market\.priceSamples\.filter\(\(sample\) => sample\.time <= now\)/);
+  assert.match(client, /runtime\.engine\.mergeChart\(state\.market\.priceSamples\)/);
+  assert.match(client, /runtime\.engine\.onBookTicker\(state\.market\.bid, state\.market\.ask/);
+  assert.doesNotMatch(orderClient, /clientPrice|displayPrice|marketPrice/);
 });

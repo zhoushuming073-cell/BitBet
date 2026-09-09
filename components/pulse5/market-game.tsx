@@ -49,6 +49,7 @@ export function MarketGame() {
   const [authRequired, setAuthRequired] = useState(false);
   const [syncError, setSyncError] = useState("");
   const hasAuthoritySnapshot = useRef(false);
+  const lastAuthorityMarketAt = useRef(0);
   const bots = useTradingBots(view, authorityBots);
 
   useEffect(() => {
@@ -72,6 +73,24 @@ export function MarketGame() {
     if (!runtime) return;
     try {
       const state = advance ? await tickAuthorityState(signal) : await fetchAuthorityState(signal);
+      if (state.market) {
+        const now = Date.now();
+        const localMarket = runtime.engine.getView(now).market;
+        const localFeedIsStale = !localMarket || now - localMarket.marketTimestamp > 2_500;
+        if (localFeedIsStale && state.market.observedAt > lastAuthorityMarketAt.current) {
+          // This is the same public snapshot supplied to Bot strategies. It is
+          // a display/feed fallback, never a client-supplied execution price.
+          runtime.engine.seedVolatility(state.market.volatilityCloses);
+          runtime.engine.setRoundOpen(state.round.id, state.market.roundOpen);
+          runtime.engine.mergeChart(state.market.priceSamples);
+          runtime.engine.onBookTicker(state.market.bid, state.market.ask, state.market.observedAt);
+          runtime.engine.onTrade(state.market.midPrice, state.market.observedAt);
+          runtime.engine.appendPoint({ time: state.market.observedAt, price: state.market.midPrice });
+          runtime.engine.setConnected(true);
+          runtime.engine.tick(now);
+          lastAuthorityMarketAt.current = state.market.observedAt;
+        }
+      }
       runtime.engine.restoreLedger(state.player, { announceNewSettlement: hasAuthoritySnapshot.current });
       hasAuthoritySnapshot.current = true;
       setAuthorityBots(state.bots);
