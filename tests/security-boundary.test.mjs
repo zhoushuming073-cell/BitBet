@@ -51,3 +51,10 @@ test("机器人与网页共用服务端发布的公开行情快照", async () =>
   assert.match(client, /runtime\.engine\.onBookTicker\(state\.market\.bid, state\.market\.ask/);
   assert.doesNotMatch(orderClient, /clientPrice|displayPrice|marketPrice/);
 });
+
+test("未登录时停止轮询，避免反复产生 401 请求", async () => {
+  const fs = await import("node:fs/promises");
+  const client = await fs.readFile(`${root}/components/pulse5/market-game.tsx`, "utf8");
+  assert.match(client, /return status !== 401/);
+  assert.match(client, /if \(shouldContinue && !controller\.signal\.aborted\)/);
+});

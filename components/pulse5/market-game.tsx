@@ -70,7 +70,7 @@ export function MarketGame() {
   }, []);
 
   const refreshAuthority = useCallback(async (signal?: AbortSignal, advance = false) => {
-    if (!runtime) return;
+    if (!runtime) return false;
     try {
       const state = advance ? await tickAuthorityState(signal) : await fetchAuthorityState(signal);
       if (state.market) {
@@ -99,11 +99,13 @@ export function MarketGame() {
       setAuthorityReady(true);
       setAuthRequired(false);
       setSyncError("");
+      return true;
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted) return false;
       const status = typeof error === "object" && error && "status" in error ? Number(error.status) : 0;
       if (status === 401) setAuthRequired(true);
       else setSyncError(error instanceof Error ? error.message : "账户同步失败");
+      return status !== 401;
     }
   }, [runtime]);
 
@@ -112,8 +114,8 @@ export function MarketGame() {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
-      await refreshAuthority(controller.signal, true);
-      if (!controller.signal.aborted) timer = setTimeout(poll, 1_500);
+      const shouldContinue = await refreshAuthority(controller.signal, true);
+      if (shouldContinue && !controller.signal.aborted) timer = setTimeout(poll, 1_500);
     };
     void poll();
     return () => {
